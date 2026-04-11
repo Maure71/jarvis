@@ -22,7 +22,7 @@ Jarvis (FastAPI + Claude Haiku + ElevenLabs + Playwright) auf macOS lauffähig m
 Alle vier Kernbereiche bleiben:
 
 1. Voice-In/Out + Claude-Brain (FastAPI + Web Speech API + ElevenLabs)
-2. Double-Clap Workspace-Launcher
+2. Double-Clap Workspace-Launcher (Apple Music statt Spotify, AC/DC-Megahits @ 30%)
 3. Browser-Automation via Playwright ("such nach X")
 4. Screenshot + Claude Vision + Tages-Briefing mit Wetter und Obsidian-Tasks
 
@@ -45,7 +45,7 @@ Beim Durchlesen des Upstream-Codes zeigt sich: die Portierung ist kleiner als zu
 
 Der PowerShell-Launcher startet Apps und snapped Fenster via Win32 `MoveWindow`. Ersatz:
 
-**`launch_session.sh`** — Orchestrierung via `open -a`:
+**`launch_session.sh`** — Orchestrierung via `open -a`, Apple Music wird durch einen dedizierten `play_music.applescript` angestoßen:
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
@@ -56,9 +56,12 @@ JARVIS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 osascript -e "tell application \"Terminal\" to do script \"cd $JARVIS_DIR && source .venv/bin/activate && python server.py\""
 
 # Apps starten
-open -a "Spotify"
 open -a "Visual Studio Code" "$JARVIS_DIR"
 open -a "Obsidian"
+
+# Apple Music: AC/DC shuffled auf 30% Lautstärke
+osascript "$JARVIS_DIR/scripts/play_music.applescript"
+
 sleep 2
 
 # Chrome mit Jarvis + zusätzlichem Tab
@@ -71,6 +74,8 @@ open -na "Google Chrome" --args \
 sleep 3
 osascript "$(dirname "$0")/launch_session.applescript"
 ```
+
+**`scripts/play_music.applescript`** — Öffnet Apple Music, setzt Lautstärke auf 30%, startet Playlist "AC/DC Megahits" (Fallback: alle AC/DC-Library-Tracks) shuffled. Der User muss einmalig "AC/DC Essentials" aus Apple Music als Playlist "AC/DC Megahits" in seine Library speichern, sonst greift nur der Fallback auf lokal vorhandene AC/DC-Titel.
 
 **`launch_session.applescript`** — Quadranten-Snapping via `System Events`:
 
@@ -97,7 +102,7 @@ tell application "System Events"
     set position of front window to {0, halfH + 25}
     set size of front window to {halfW, halfH}
   end tell
-  tell process "Spotify"
+  tell process "Music"
     set position of front window to {halfW, halfH + 25}
     set size of front window to {halfW, halfH}
   end tell
@@ -119,12 +124,13 @@ Der Upstream hat Windows-Pfade in `config.example.json`. Neue Defaults:
   "user_address": "Sir",
   "city": "Hamburg",
   "workspace_path": "/Users/mariopustan/code/jarvis",
-  "spotify_track": "spotify:track:YOUR_TRACK_ID",
   "browser_url": "https://example.com",
   "obsidian_inbox_path": "/Users/mariopustan/Documents/Obsidian/Inbox",
   "apps": []
 }
 ```
+
+Spotify-Track-Felder entfallen; die Musik-Config ist im `play_music.applescript` hardcodiert (AC/DC-Megahits @ 30%) und kann dort direkt editiert werden.
 
 Die Env-Vars `ANTHROPIC_API_KEY` und `ELEVENLABS_API_KEY` landen zusätzlich in einer `.env`-Datei (gitignored), damit sie nicht im JSON stehen müssen. `server.py` wird minimal erweitert, Env-Vars vor JSON zu bevorzugen.
 
@@ -220,7 +226,7 @@ Systemeinstellungen → Datenschutz & Sicherheit:
 | Mikrofon | Terminal, Chrome | clap_trigger + Web Speech API |
 | Bedienungshilfen | Terminal, osascript | Fensterpositionierung |
 | Bildschirmaufnahme | Python | `PIL.ImageGrab` Screenshots |
-| Automation | osascript | Spotify/VS Code/Chrome steuern |
+| Automation | osascript | Music/VS Code/Chrome steuern |
 
 ## Umsetzungsschritte
 
@@ -246,3 +252,4 @@ Systemeinstellungen → Datenschutz & Sicherheit:
 - **ElevenLabs-Stimme** — vorherige Stimme war englisch. Deutsche Butler-Stimme muss im ElevenLabs-Katalog gewählt werden. Voice-ID kommt in `config.json`.
 - **Obsidian-Inbox-Pfad** — Tasks-Integration hängt davon ab, dass der Pfad existiert. Falls leer, zeigt `server.py` einfach kein Task-Briefing.
 - **ElevenLabs-Key rotieren** — der Key aus dem Chat gilt als kompromittiert und wird nicht verwendet.
+- **Apple Music Library-Abhängigkeit** — AppleScript hat keinen offiziellen Zugriff auf den Apple Music Streaming-Katalog. Die AC/DC-Wiedergabe funktioniert nur, wenn eine Playlist "AC/DC Megahits" in der Library liegt oder AC/DC-Titel lokal gespeichert sind. One-time-Setup: "AC/DC Essentials" aus Apple Music in die Library speichern und als "AC/DC Megahits" umbenennen.
