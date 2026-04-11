@@ -9,5 +9,10 @@
   "browser_url": "https://example.com",
   "obsidian_inbox_path": "/Users/YOU/Documents/Obsidian/Inbox",
   "obsidian_profile_path": "/Users/YOU/Documents/Obsidian/About Me.md",
+  "home_assistant_url": "https://YOUR_NABU_CASA_ID.ui.nabu.casa",
+  "home_assistant_entities": [
+    "sensor.example_temperature",
+    "person.you"
+  ],
   "apps": []
 }

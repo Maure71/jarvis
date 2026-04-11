@@ -50,6 +50,9 @@ app = FastAPI()
 
 import browser_tools
 import screen_capture
+import home_assistant
+
+ha_client = home_assistant.build_client_from_config(config)
 
 
 def get_weather_sync():
@@ -108,19 +111,33 @@ def get_profile_sync():
         return ""
 
 
+def get_home_sync():
+    """Fetch a compact Home Assistant dashboard snapshot (sync wrapper)."""
+    if not ha_client.configured:
+        return ""
+    try:
+        return asyncio.run(ha_client.get_dashboard_status())
+    except Exception as e:
+        print(f"[jarvis] HA load error: {e}", flush=True)
+        return ""
+
+
 def refresh_data():
-    """Refresh weather, tasks and profile."""
-    global WEATHER_INFO, TASKS_INFO, PROFILE_INFO
+    """Refresh weather, tasks, profile and Home Assistant dashboard."""
+    global WEATHER_INFO, TASKS_INFO, PROFILE_INFO, HOME_INFO
     WEATHER_INFO = get_weather_sync()
     TASKS_INFO = get_tasks_sync()
     PROFILE_INFO = get_profile_sync()
+    HOME_INFO = get_home_sync()
     print(f"[jarvis] Wetter: {WEATHER_INFO}", flush=True)
     print(f"[jarvis] Tasks: {len(TASKS_INFO)} geladen", flush=True)
     print(f"[jarvis] Profil: {len(PROFILE_INFO)} Zeichen geladen", flush=True)
+    print(f"[jarvis] Home Assistant: {len(HOME_INFO)} Zeichen geladen", flush=True)
 
 WEATHER_INFO = ""
 TASKS_INFO = []
 PROFILE_INFO = ""
+HOME_INFO = ""
 refresh_data()
 
 # Action parsing
@@ -146,6 +163,14 @@ def build_system_prompt():
             "=== ENDE PROFIL ==="
         )
 
+    home_block = ""
+    if HOME_INFO:
+        home_block = (
+            "\n\n=== SMART HOME STATUS (Home Assistant) ===\n"
+            f"{HOME_INFO}\n"
+            "=== ENDE SMART HOME ==="
+        )
+
     return f"""Du bist Jarvis, der KI-Assistent von Tony Stark aus Iron Man. Dein Dienstherr ist {USER_NAME}. Du sprichst ausschliesslich Deutsch. {USER_NAME} moechte mit "{USER_ADDRESS}" angesprochen und gesiezt werden. Nutze "Sie" als Pronomen — FALSCH: "{USER_ADDRESS} planen", RICHTIG: "Sie planen, {USER_ADDRESS}". Dein Ton ist trocken, sarkastisch und britisch-hoeflich - wie ein Butler der alles gesehen hat und trotzdem loyal bleibt. Du machst subtile, trockene Bemerkungen, bist aber niemals respektlos. Wenn {USER_ADDRESS} eine offensichtliche Frage stellt, darfst du mit elegantem Sarkasmus antworten. Du bist hochintelligent, effizient und immer einen Schritt voraus. Halte deine Antworten kurz - maximal 3 Saetze. Du kommentierst fragwuerdige Entscheidungen hoeflich aber spitz.
 
 Du kennst {USER_NAME} gut — nutze das PROFIL unten, um Fragen konkret zu beantworten. Wenn {USER_NAME} nach etwas fragt, das im Profil steht (Familie, Firmen, Haus, Fahrzeuge, Smart Home, Projekte), beziehe dich darauf, als waere es selbstverstaendlich — du bist schliesslich sein Butler. Erfinde NICHTS, was nicht im Profil steht.
@@ -159,6 +184,7 @@ AKTIONEN - Schreibe die passende Aktion ans ENDE deiner Antwort. Der Text VOR de
 [ACTION:OPEN] url - URL im Browser oeffnen
 [ACTION:SCREEN] - Bildschirm ansehen und beschreiben. WICHTIG: Bei SCREEN schreibe NUR die Aktion, KEINEN Text davor. Also NUR "[ACTION:SCREEN]" und sonst nichts.
 [ACTION:NEWS] - Aktuelle Weltnachrichten abrufen. Nutze diese Aktion wenn nach News, Nachrichten, was in der Welt passiert, aktuelle Lage oder Weltgeschehen gefragt wird. Schreibe einen kurzen Satz davor wie "Ich schaue nach den aktuellen Nachrichten."
+[ACTION:HOME] suchbegriff - Smart Home Status aus Home Assistant abrufen. Ohne Suchbegriff bekommst du den kompletten Dashboard-Status (Solar, Wallbox, Pool, Fahrzeuge, Alarm, Anwesenheit). Mit Suchbegriff (z.B. "pool" oder "volvo") nur die passenden Sensoren. Nutze diese Aktion bei Fragen nach Solar, PV, Batterie, Wallbox, Pool, Garten, Bewässerung, Auto/Fahrzeug-Akku, Alarm, ob jemand zu Hause ist, CO2, Außentemperatur oder Smart Home allgemein. Der aktuelle Stand steht unten auch schon im Block SMART HOME STATUS — bei einfachen Fragen kannst du direkt daraus antworten, bei detaillierten Fragen nutze die Aktion fuer frische Daten.
 
 WENN {USER_NAME} "Jarvis activate" sagt:
 - Begruesse ihn passend zur Tageszeit (aktuelle Zeit: {{time}}).
@@ -167,7 +193,7 @@ WENN {USER_NAME} "Jarvis activate" sagt:
 - Sei kreativ bei der Begruessung.
 
 === AKTUELLE DATEN ==={weather_block}{task_block}
-==={profile_block}"""
+==={profile_block}{home_block}"""
 
 
 def get_system_prompt():
@@ -252,6 +278,18 @@ async def execute_action(action: dict) -> str:
     elif t == "NEWS":
         result = await browser_tools.fetch_news()
         return result
+
+    elif t == "HOME":
+        # Optional payload = search query. Empty payload = full dashboard.
+        if p:
+            hits = await ha_client.search_entities(p)
+            if not hits:
+                return f"Keine Sensoren zu '{p}' gefunden."
+            return "\n".join(
+                f"{fn or eid}: {state}" for eid, fn, state in hits
+            )
+        dashboard = await ha_client.get_dashboard_status()
+        return dashboard or "Home Assistant nicht erreichbar."
 
     return ""
 
