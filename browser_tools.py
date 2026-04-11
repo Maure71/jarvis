@@ -15,15 +15,19 @@ _context = None
 
 
 def _bring_chromium_to_front():
-    """Bring the Playwright Chromium window to the foreground on Windows."""
+    """Bring the Playwright Chromium window to the foreground on macOS.
+
+    Playwright launches its own bundled Chromium — its process name is
+    "Chromium" in System Events. We ask System Events to set its
+    frontmost flag. Falls back silently if Chromium isn't running yet
+    or if Accessibility permission isn't granted.
+    """
     try:
         subprocess.run([
-            "powershell", "-Command",
-            '(Get-Process -Name "chromium","chrome" -ErrorAction SilentlyContinue | '
-            'Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -Last 1).MainWindowHandle | '
-            'ForEach-Object { Add-Type "using System; using System.Runtime.InteropServices; '
-            'public class W { [DllImport(\\\"user32.dll\\\")] public static extern bool SetForegroundWindow(IntPtr h); }"; '
-            '[W]::SetForegroundWindow($_) }'
+            "osascript", "-e",
+            'tell application "System Events" to '
+            'if exists (process "Chromium") then '
+            'set frontmost of process "Chromium" to true'
         ], capture_output=True, timeout=3)
     except Exception:
         pass
@@ -35,7 +39,8 @@ async def _get_browser():
         pw = await async_playwright().start()
         _browser = await pw.chromium.launch(headless=False, args=["--start-maximized"])
         _context = await _browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             no_viewport=True,
         )
     return _context
