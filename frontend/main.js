@@ -23,7 +23,13 @@ document.addEventListener('touchstart', unlockAudio, { once: false });
 document.addEventListener('keydown', unlockAudio, { once: false });
 
 function connect() {
-    ws = new WebSocket(`ws://${location.host}/ws`);
+    // Use wss:// when the page itself is HTTPS (e.g. accessed via
+    // Tailscale serve / reverse proxy). Browsers block mixed-content
+    // ws:// from an https:// origin, which would manifest as the orb
+    // staying in the "thinking" state forever because the user's
+    // transcript is sent into a socket that never opened.
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${wsProto}//${location.host}/ws`);
     ws.onopen = () => {
         console.log('[jarvis] WebSocket connected');
         status.textContent = 'Klicke einmal irgendwo, dann spricht Jarvis.';
