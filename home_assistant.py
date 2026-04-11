@@ -232,6 +232,39 @@ class HomeAssistantClient:
         if v := val("sensor.pustans_garten_tagliche_aktive_bewasserungszeit", " min"):
             lines.append(f"Garten: Bewässerung heute {v}")
 
+        # Gesundheit (Apple Watch via HA Companion App HealthKit-Bridge)
+        #
+        # TODO (geplant, blockiert durch HealthKit-Permission-Flow):
+        # Die iOS HA Companion App liefert Apple Watch Health-Daten als
+        # Sensoren, sobald der HealthKit-Zugriff einmalig gewährt wurde.
+        # Aktuell hängt der Permission-Dialog — siehe Session-Handoff.
+        #
+        # Sobald das läuft:
+        #   1. In HA prüfen welche sensor.*-IDs neu erscheinen
+        #      (Developer Tools → States, filter: "iphone" oder "mario")
+        #   2. Interessante IDs in config.json unter home_assistant_entities
+        #      eintragen (Herzfrequenz, Ruhepuls, HRV, Schlaf, VO2Max,
+        #      Blutsauerstoff, Aktive Kalorien, Schritte, Stehstunden,
+        #      Trainingsminuten)
+        #   3. Diese Sektion hier mit val()-Lookups füllen, analog zu
+        #      Klima/Pool/Fahrzeuge oben. Beispiel-Skelett:
+        #
+        #   health_parts = []
+        #   if v := val("sensor.<device>_heart_rate", " bpm"):
+        #       health_parts.append(f"Puls {v}")
+        #   if v := val("sensor.<device>_resting_heart_rate", " bpm"):
+        #       health_parts.append(f"Ruhepuls {v}")
+        #   if v := val("sensor.<device>_heart_rate_variability", " ms"):
+        #       health_parts.append(f"HRV {v}")
+        #   if v := val("sensor.<device>_sleep_analysis"):
+        #       health_parts.append(f"Schlaf {v}")
+        #   if v := val("sensor.<device>_vo2_max", " ml/kg/min"):
+        #       health_parts.append(f"VO₂max {v}")
+        #   if v := val("sensor.<device>_active_energy", " kcal"):
+        #       health_parts.append(f"Aktive kcal {v}")
+        #   if health_parts:
+        #       lines.append("Gesundheit: " + ", ".join(health_parts))
+
         return "\n".join(lines)
 
     async def search_entities(self, query: str) -> list[tuple[str, str, str]]:
