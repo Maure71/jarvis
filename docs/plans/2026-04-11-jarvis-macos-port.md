@@ -22,7 +22,7 @@ Before starting Task 1, verify:
 - [ ] `git config user.name` returns `Mario Pustan`.
 - [ ] `python3 --version` returns 3.11 or higher.
 - [ ] macOS 14 or later (Sonoma/Sequoia — needed for reliable AppleScript `System Events` behavior).
-- [ ] Apple Music is signed in and has either (a) a playlist named "AC/DC Megahits" in the library, or (b) AC/DC tracks saved to the library. Without one of these, the music-start step is a no-op. One-time fix: open Music.app → Search "AC/DC Essentials" → "+ Add" to library → rename to "AC/DC Megahits" (or change the name in `scripts/play_music.applescript`).
+- [ ] Apple Music is signed in and has either (a) a playlist named "Jarvis Wake-Up" in the library, or (b) AC/DC tracks saved to the library. Without one of these, the music-start step is a no-op. One-time fix: open Music.app → Search "AC/DC Essentials" → "+ Add" to library → rename to "Jarvis Wake-Up" (or change the name in `scripts/play_music.applescript`).
 
 If any check fails, stop and resolve before continuing.
 
@@ -465,15 +465,15 @@ Both files are committed together because the bash launcher calls the AppleScrip
 
 **Step 1: Write `scripts/play_music.applescript`**
 
-Apple Music has no clean public AppleScript search for Apple Music Catalog items, but it can start playlists that live in the user's library and it can play tracks by artist name from the local library. The script tries both: first a user playlist named "AC/DC Megahits", then a fallback of all library tracks whose artist contains "AC/DC", shuffled.
+Apple Music has no clean public AppleScript search for Apple Music Catalog items, but it can start playlists that live in the user's library and it can play tracks by artist name from the local library. The script tries both: first a user playlist named "Jarvis Wake-Up", then a fallback of all library tracks whose artist contains "AC/DC", shuffled.
 
-The user needs a one-time setup: open Apple Music, search for AC/DC, and add the "AC/DC Essentials" playlist (or any playlist of their choosing) to their library. Rename it "AC/DC Megahits" — or change the name in this script.
+The user needs a one-time setup: open Apple Music, search for AC/DC, and add the "AC/DC Essentials" playlist (or any playlist of their choosing) to their library. Rename it "Jarvis Wake-Up" — or change the name in this script.
 
 ```applescript
 -- Jarvis — Play Music (macOS)
 -- Starts Apple Music, sets volume to 30%, plays AC/DC shuffled.
 
-set targetPlaylistName to "AC/DC Megahits"
+set targetPlaylistName to "Jarvis Wake-Up"
 set targetArtistName to "AC/DC"
 set targetVolume to 30
 

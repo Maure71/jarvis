@@ -75,7 +75,7 @@ sleep 3
 osascript "$(dirname "$0")/launch_session.applescript"
 ```
 
-**`scripts/play_music.applescript`** — Öffnet Apple Music, setzt Lautstärke auf 30%, startet Playlist "AC/DC Megahits" (Fallback: alle AC/DC-Library-Tracks) shuffled. Der User muss einmalig "AC/DC Essentials" aus Apple Music als Playlist "AC/DC Megahits" in seine Library speichern, sonst greift nur der Fallback auf lokal vorhandene AC/DC-Titel.
+**`scripts/play_music.applescript`** — Öffnet Apple Music, setzt Lautstärke auf 30%, startet Playlist "Jarvis Wake-Up" (Fallback: alle AC/DC-Library-Tracks) shuffled. Der User muss einmalig "AC/DC Essentials" aus Apple Music als Playlist "Jarvis Wake-Up" in seine Library speichern, sonst greift nur der Fallback auf lokal vorhandene AC/DC-Titel.
 
 **`launch_session.applescript`** — Quadranten-Snapping via `System Events`:
 
@@ -252,4 +252,4 @@ Systemeinstellungen → Datenschutz & Sicherheit:
 - **ElevenLabs-Stimme** — vorherige Stimme war englisch. Deutsche Butler-Stimme muss im ElevenLabs-Katalog gewählt werden. Voice-ID kommt in `config.json`.
 - **Obsidian-Inbox-Pfad** — Tasks-Integration hängt davon ab, dass der Pfad existiert. Falls leer, zeigt `server.py` einfach kein Task-Briefing.
 - **ElevenLabs-Key rotieren** — der Key aus dem Chat gilt als kompromittiert und wird nicht verwendet.
-- **Apple Music Library-Abhängigkeit** — AppleScript hat keinen offiziellen Zugriff auf den Apple Music Streaming-Katalog. Die AC/DC-Wiedergabe funktioniert nur, wenn eine Playlist "AC/DC Megahits" in der Library liegt oder AC/DC-Titel lokal gespeichert sind. One-time-Setup: "AC/DC Essentials" aus Apple Music in die Library speichern und als "AC/DC Megahits" umbenennen.
+- **Apple Music Library-Abhängigkeit** — AppleScript hat keinen offiziellen Zugriff auf den Apple Music Streaming-Katalog. Die AC/DC-Wiedergabe funktioniert nur, wenn eine Playlist "Jarvis Wake-Up" in der Library liegt oder AC/DC-Titel lokal gespeichert sind. One-time-Setup: "AC/DC Essentials" aus Apple Music in die Library speichern und als "Jarvis Wake-Up" umbenennen.
