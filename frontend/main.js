@@ -76,7 +76,30 @@ function sendLocation() {
     });
 }
 
+// Guard against double-connecting. connect() is called from:
+//   1. initial page load
+//   2. ws.onclose auto-reconnect
+//   3. visibilitychange when the PWA comes back to foreground
+// Without this flag a PWA that was backgrounded for a while can end up
+// with several parallel WebSockets racing to send "Jarvis activate".
+let reconnectPending = false;
+
+function scheduleReconnect(delay) {
+    if (reconnectPending) return;
+    reconnectPending = true;
+    setTimeout(() => {
+        reconnectPending = false;
+        connect();
+    }, delay);
+}
+
 function connect() {
+    // Skip if a live or connecting socket already exists — this protects
+    // us from the visibility-resume path stepping on the onclose-reconnect
+    // path when both fire in quick succession.
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
     // Use wss:// when the page itself is HTTPS (e.g. accessed via
     // Tailscale serve / reverse proxy). Browsers block mixed-content
     // ws:// from an https:// origin, which would manifest as the orb
@@ -111,9 +134,28 @@ function connect() {
     };
     ws.onclose = () => {
         status.textContent = 'Verbindung verloren...';
-        setTimeout(connect, 3000);
+        scheduleReconnect(3000);
+    };
+    ws.onerror = () => {
+        // Let onclose drive the reconnect. Logging only so we see it
+        // in the console if the user is debugging.
+        console.warn('[jarvis] WebSocket error — onclose will handle reconnect');
     };
 }
+
+// When the PWA comes back to the foreground (iOS Safari suspends JS in
+// backgrounded tabs/PWAs aggressively), kick the reconnect immediately
+// instead of waiting up to 3s for the onclose timer — which may not
+// even fire reliably because iOS killed the timer while suspended.
+// This is the single biggest stability improvement for the
+// home-screen Web App scenario.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        status.textContent = 'Verbinde neu...';
+        scheduleReconnect(0);
+    }
+});
 
 function queueAudio(base64Audio) {
     audioQueue.push(base64Audio);
