@@ -13,17 +13,26 @@ import time
 
 import anthropic
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-# Load config
+# Load .env first, then config.json. Env vars win.
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
 
-ANTHROPIC_API_KEY = config["anthropic_api_key"]
-ELEVENLABS_API_KEY = config["elevenlabs_api_key"]
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY") or config.get("anthropic_api_key", "")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY") or config.get("elevenlabs_api_key", "")
+
+if not ANTHROPIC_API_KEY or not ELEVENLABS_API_KEY:
+    raise RuntimeError(
+        "Missing API keys. Set ANTHROPIC_API_KEY and ELEVENLABS_API_KEY in .env "
+        "or config.json."
+    )
 ELEVENLABS_VOICE_ID = config.get("elevenlabs_voice_id", "rDmv3mOhK6TnhYWckFaD")
 USER_NAME = config.get("user_name", "Julian")
 USER_ADDRESS = config.get("user_address", "Sir")
