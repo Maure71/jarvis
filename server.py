@@ -84,6 +84,22 @@ def get_weather_sync():
         return None
 
 
+# Bounding box around Kisdorf (Schleswig-Holstein). Generous enough to
+# cover the whole municipality + immediate surroundings, so that any
+# phone reading inside the village still resolves to "Kisdorf" instead
+# of wttr.in's default guess of "Henstedt-Ulzburg".
+# Kisdorf center: ~53.7667°N, 10.0167°E.
+_KISDORF_LAT_MIN, _KISDORF_LAT_MAX = 53.74, 53.80
+_KISDORF_LON_MIN, _KISDORF_LON_MAX = 9.97, 10.07
+
+
+def _is_in_kisdorf(lat: float, lon: float) -> bool:
+    return (
+        _KISDORF_LAT_MIN <= lat <= _KISDORF_LAT_MAX
+        and _KISDORF_LON_MIN <= lon <= _KISDORF_LON_MAX
+    )
+
+
 def get_weather_for_coords_sync(lat: float, lon: float) -> dict | None:
     """Fetch weather + reverse-geocoded city name for a lat/lon pair.
 
@@ -110,6 +126,14 @@ def get_weather_for_coords_sync(lat: float, lon: float) -> dict | None:
             city_name = data["nearest_area"][0]["areaName"][0]["value"] or city_name
         except (KeyError, IndexError, TypeError):
             pass
+
+        # Local override: wttr.in's reverse-geocoder occasionally snaps
+        # the home area to the next larger town (Henstedt-Ulzburg) even
+        # though the actual address is in Kisdorf. If the coordinates
+        # fall inside a generous bounding box around Kisdorf, force the
+        # correct name. See CLAUDE.md ("Nutzer-Standort") for context.
+        if _is_in_kisdorf(lat, lon):
+            city_name = "Kisdorf"
         return {
             "temp": c["temp_C"],
             "feels_like": c["FeelsLikeC"],
