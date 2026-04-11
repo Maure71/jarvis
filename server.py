@@ -227,14 +227,33 @@ def get_lights_sync():
         return []
 
 
+def get_home_weather_sync():
+    """Fetch weather from local HA sensors (sync wrapper).
+
+    Preferred over wttr.in when we are at home, because the Homematic IP
+    Wettersensor Pro + Arbeitszimmer-Außenfühler give readings from the
+    actual house, not the nearest city centre. Same module-load-only
+    caveat as get_home_sync / get_lights_sync.
+    """
+    if not ha_client.configured:
+        return None
+    try:
+        return asyncio.run(ha_client.get_home_weather())
+    except Exception as e:
+        print(f"[jarvis] HA weather error: {e}", flush=True)
+        return None
+
+
 def refresh_data():
     """Sync refresh — for the initial module-load call only."""
     global WEATHER_INFO, TASKS_INFO, PROFILE_INFO, HOME_INFO, LIGHTS_INFO
-    WEATHER_INFO = get_weather_sync()
     TASKS_INFO = get_tasks_sync()
     PROFILE_INFO = get_profile_sync()
     HOME_INFO = get_home_sync()
     LIGHTS_INFO = get_lights_sync()
+    # Prefer the local Homematic/Arbeitszimmer weather sensors over
+    # wttr.in. wttr.in only kicks in as a fallback if HA has no reading.
+    WEATHER_INFO = get_home_weather_sync() or get_weather_sync()
     _log_refresh()
 
 
@@ -245,9 +264,9 @@ async def refresh_data_async():
     would raise 'cannot be called from a running event loop'.
     """
     global WEATHER_INFO, TASKS_INFO, PROFILE_INFO, HOME_INFO, LIGHTS_INFO
-    WEATHER_INFO = get_weather_sync()
     TASKS_INFO = get_tasks_sync()
     PROFILE_INFO = get_profile_sync()
+    ha_weather: dict | None = None
     if ha_client.configured:
         try:
             HOME_INFO = await ha_client.get_dashboard_status()
@@ -259,9 +278,16 @@ async def refresh_data_async():
         except Exception as e:
             print(f"[jarvis] Lights load error: {e}", flush=True)
             LIGHTS_INFO = []
+        try:
+            ha_weather = await ha_client.get_home_weather()
+        except Exception as e:
+            print(f"[jarvis] HA weather error: {e}", flush=True)
+            ha_weather = None
     else:
         HOME_INFO = ""
         LIGHTS_INFO = []
+    # Fall back to wttr.in only if HA has nothing for us.
+    WEATHER_INFO = ha_weather or get_weather_sync()
     _log_refresh()
 
 WEATHER_INFO = ""
@@ -301,7 +327,15 @@ def build_system_prompt(session_id: str | None = None):
     weather_block = ""
     if effective_weather:
         w = effective_weather
-        weather_block = f"\nWetter {effective_city}: {w['temp']}°C, gefuehlt {w['feels_like']}°C, {w['description']}"
+        parts = [f"{w.get('temp', '?')}°C"]
+        feels = w.get("feels_like")
+        # Skip "gefuehlt" if we don't have it (HA sensors) or it matches
+        # the raw temperature (redundant).
+        if feels and str(feels) != str(w.get("temp")):
+            parts.append(f"gefuehlt {feels}°C")
+        if w.get("description"):
+            parts.append(str(w["description"]))
+        weather_block = f"\nWetter {effective_city}: " + ", ".join(parts)
         if session_weather:
             weather_block += f" (aktueller Standort von {USER_NAME})"
 
@@ -653,19 +687,40 @@ async def websocket_endpoint(ws: WebSocket):
                 except (TypeError, ValueError):
                     print(f"[jarvis] Invalid location payload: {data}", flush=True)
                     continue
-                # wttr.in lookup is a blocking urllib call — push it to
-                # a thread so we don't stall the event loop if the API
-                # is slow.
-                weather = await asyncio.to_thread(get_weather_for_coords_sync, lat, lon)
+
+                weather: dict | None = None
+                # If the phone is at home, prefer the Homematic / outdoor
+                # sensors on the roof over wttr.in — they are hanging on
+                # the actual house and the number is always correct.
+                if _is_in_kisdorf(lat, lon) and ha_client.configured:
+                    try:
+                        ha_weather = await ha_client.get_home_weather()
+                    except Exception as e:
+                        print(f"[jarvis] HA weather error on location: {e}", flush=True)
+                        ha_weather = None
+                    if ha_weather:
+                        ha_weather["city"] = "Kisdorf"
+                        ha_weather["lat"] = lat
+                        ha_weather["lon"] = lon
+                        weather = ha_weather
+
+                # Away from home, or HA unreachable — fall back to wttr.in.
+                if weather is None:
+                    weather = await asyncio.to_thread(
+                        get_weather_for_coords_sync, lat, lon
+                    )
+
                 if weather:
                     session_context[session_id] = {
                         "weather": weather,
                         "city": weather.get("city"),
                     }
+                    src = weather.get("source", "wttr")
                     print(
-                        f"[jarvis] Location override: {weather.get('city')} "
+                        f"[jarvis] Location override [{src}]: "
+                        f"{weather.get('city')} "
                         f"({lat:.4f},{lon:.4f}) -> {weather['temp']}°C "
-                        f"{weather['description']}",
+                        f"{weather.get('description', '')}",
                         flush=True,
                     )
                 else:

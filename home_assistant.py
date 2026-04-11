@@ -394,6 +394,78 @@ class HomeAssistantClient:
                 hits.append((eid, fn, s.get("state", "")))
         return hits
 
+    async def get_home_weather(self) -> dict | None:
+        """Return a wttr-compatible weather dict built from local HA sensors.
+
+        Uses the curated Homematic / outdoor sensors that already feed
+        the Klima section of the dashboard. Only returns a dict if we at
+        least have an outdoor temperature — without that there is nothing
+        meaningful to say. The 'description' field is synthesised from
+        the rain binary + wind speed so the system prompt still gets a
+        natural-language snippet ("regnet gerade, windig") instead of a
+        bare number.
+        """
+        if not self.configured:
+            return None
+        states = await self.get_curated_states()
+        by_id = {s["entity_id"]: s for s in states}
+
+        def raw(eid: str) -> str | None:
+            s = by_id.get(eid)
+            if not s:
+                return None
+            v = s.get("state", "")
+            if v in ("unknown", "unavailable", "none", "None", ""):
+                return None
+            return v
+
+        temp = raw("sensor.arbeitszimmer_oben_aussen_temperatur")
+        if temp is None:
+            return None
+
+        humidity = raw("sensor.arbeitszimmer_oben_aussen_luftfeuchtigkeit")
+        wind = raw("sensor.homematic_ip_wettersensor_pro_windspeed")
+        rain_today = raw("sensor.homematic_ip_wettersensor_pro_today_rain")
+        raining_now = raw("binary_sensor.homematic_ip_wettersensor_pro_raining")
+
+        parts: list[str] = []
+        if raining_now == "on":
+            parts.append("regnet gerade")
+        else:
+            had_rain_today = False
+            if rain_today:
+                try:
+                    had_rain_today = float(rain_today) > 0.1
+                except (TypeError, ValueError):
+                    had_rain_today = False
+            parts.append("trocken mit Regen heute früher" if had_rain_today else "trocken")
+
+        if wind:
+            try:
+                wind_val = float(wind)
+                if wind_val >= 40:
+                    parts.append("stürmisch")
+                elif wind_val >= 20:
+                    parts.append("windig")
+                elif wind_val >= 10:
+                    parts.append("leichter Wind")
+            except (TypeError, ValueError):
+                pass
+
+        description = ", ".join(parts)
+
+        return {
+            "temp": temp,
+            # HA does not give us a proper "feels like" — null it out and
+            # let the prompt builder skip the 'gefuehlt ...' phrase.
+            "feels_like": None,
+            "description": description,
+            "humidity": humidity or "",
+            "wind_kmh": wind or "",
+            "rain_today_mm": rain_today or "",
+            "source": "ha",
+        }
+
     # ------------------------------------------------------------------
     # Write-path: service calls + Philips Hue lighting control
     # ------------------------------------------------------------------
