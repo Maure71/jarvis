@@ -25,6 +25,57 @@ document.addEventListener('click', unlockAudio, { once: false });
 document.addEventListener('touchstart', unlockAudio, { once: false });
 document.addEventListener('keydown', unlockAudio, { once: false });
 
+// Mobile-only geolocation override. On iPhone/Android the user often
+// isn't at home (Kisdorf) — ask the browser for the current position
+// and hand it to the server BEFORE the first "Jarvis activate" so the
+// greeting uses the right city + weather. On desktop we skip this
+// entirely, so the Mac Mini keeps its fixed home location without ever
+// prompting for a permission the user doesn't want there.
+const IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+function sendLocation() {
+    return new Promise((resolve) => {
+        if (!IS_MOBILE || !navigator.geolocation) {
+            resolve();
+            return;
+        }
+        let done = false;
+        const finish = () => { if (!done) { done = true; resolve(); } };
+        // Hard 5s budget — we don't want the activate greeting to sit
+        // silent forever if the user taps "Deny" or the GPS is slow.
+        const timer = setTimeout(finish, 5000);
+        try {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    clearTimeout(timer);
+                    try {
+                        ws.send(JSON.stringify({
+                            type: 'location',
+                            lat: pos.coords.latitude,
+                            lon: pos.coords.longitude,
+                        }));
+                        console.log('[jarvis] Location sent:',
+                            pos.coords.latitude.toFixed(4),
+                            pos.coords.longitude.toFixed(4));
+                    } catch (e) {
+                        console.warn('[jarvis] Location send failed', e);
+                    }
+                    finish();
+                },
+                (err) => {
+                    clearTimeout(timer);
+                    console.log('[jarvis] Geolocation denied/unavailable:', err.message);
+                    finish();
+                },
+                { enableHighAccuracy: false, timeout: 4000, maximumAge: 300000 }
+            );
+        } catch (e) {
+            clearTimeout(timer);
+            finish();
+        }
+    });
+}
+
 function connect() {
     // Use wss:// when the page itself is HTTPS (e.g. accessed via
     // Tailscale serve / reverse proxy). Browsers block mixed-content
@@ -33,10 +84,15 @@ function connect() {
     // transcript is sent into a socket that never opened.
     const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${wsProto}//${location.host}/ws`);
-    ws.onopen = () => {
+    ws.onopen = async () => {
         console.log('[jarvis] WebSocket connected');
         status.textContent = 'Klicke einmal irgendwo, dann spricht Jarvis.';
         setOrbState('thinking');
+        // On mobile, push the current location first so the server has
+        // it ready before it builds the system prompt for the greeting.
+        // Bounded by a 5s timeout inside sendLocation() so a denied or
+        // slow GPS never blocks the greeting entirely.
+        await sendLocation();
         ws.send(JSON.stringify({ text: 'Jarvis activate' }));
     };
     ws.onmessage = (event) => {

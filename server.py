@@ -56,7 +56,7 @@ ha_client = home_assistant.build_client_from_config(config)
 
 
 def get_weather_sync():
-    """Fetch raw weather data at startup."""
+    """Fetch raw weather data at startup (for the fixed home CITY)."""
     import urllib.request
     try:
         req = urllib.request.Request(f"https://wttr.in/{CITY}?format=j1", headers={"User-Agent": "curl"})
@@ -71,6 +71,47 @@ def get_weather_sync():
             "wind_kmh": c["windspeedKmph"],
         }
     except:
+        return None
+
+
+def get_weather_for_coords_sync(lat: float, lon: float) -> dict | None:
+    """Fetch weather + reverse-geocoded city name for a lat/lon pair.
+
+    Used by the mobile geolocation override: the iPhone sends its current
+    position, and we look up wttr.in with "{lat},{lon}". wttr's j1 JSON
+    response always includes a nearest_area[0].areaName[0].value string,
+    which we treat as the user's current city so Jarvis can greet them
+    with the right place name ("in Hamburg" instead of "in Kisdorf").
+    Blocking urllib.request call, wrapped in asyncio.to_thread at the
+    async call site.
+    """
+    import urllib.request
+    try:
+        url = f"https://wttr.in/{lat},{lon}?format=j1"
+        req = urllib.request.Request(url, headers={"User-Agent": "curl"})
+        resp = urllib.request.urlopen(req, timeout=5)
+        data = json.loads(resp.read())
+        c = data["current_condition"][0]
+        # Reverse-geocoded area name from wttr. Fall back to a generic
+        # "Ihrem aktuellen Standort" if the shape is unexpected, because
+        # anything here is more useful than crashing.
+        city_name = "Ihrem aktuellen Standort"
+        try:
+            city_name = data["nearest_area"][0]["areaName"][0]["value"] or city_name
+        except (KeyError, IndexError, TypeError):
+            pass
+        return {
+            "temp": c["temp_C"],
+            "feels_like": c["FeelsLikeC"],
+            "description": c["weatherDesc"][0]["value"],
+            "humidity": c["humidity"],
+            "wind_kmh": c["windspeedKmph"],
+            "city": city_name,
+            "lat": lat,
+            "lon": lon,
+        }
+    except Exception as e:
+        print(f"[jarvis] Geo weather lookup failed: {e}", flush=True)
         return None
 
 
@@ -176,11 +217,34 @@ ACTION_PATTERN = re.compile(r'\[ACTION:(\w+)\]\s*(.*?)$', re.DOTALL | re.MULTILI
 
 conversations: dict[str, list] = {}
 
-def build_system_prompt():
+# Per-session overrides keyed by session_id. The mobile frontend sends
+# {"type": "location", "lat": ..., "lon": ...} once at startup; the server
+# looks up current weather + reverse-geocoded city for that position and
+# stores the result here. build_system_prompt(session_id) then prefers
+# this over the global CITY/WEATHER_INFO so Jarvis talks about "Hamburg"
+# when the user is in Hamburg, but still defaults to Kisdorf on the Mac
+# Mini where no location override is sent.
+session_context: dict[str, dict] = {}
+
+
+def build_system_prompt(session_id: str | None = None):
+    # Per-session override for mobile geolocation. If the client sent a
+    # {type:location} message, we use its reverse-geocoded city + fresh
+    # weather reading; otherwise we fall back to the home CITY / startup
+    # WEATHER_INFO.
+    override = session_context.get(session_id or "", {}) if session_id else {}
+    session_weather = override.get("weather")
+    session_city = override.get("city")
+
+    effective_city = session_city or CITY
+    effective_weather = session_weather or WEATHER_INFO
+
     weather_block = ""
-    if WEATHER_INFO:
-        w = WEATHER_INFO
-        weather_block = f"\nWetter {CITY}: {w['temp']}°C, gefuehlt {w['feels_like']}°C, {w['description']}"
+    if effective_weather:
+        w = effective_weather
+        weather_block = f"\nWetter {effective_city}: {w['temp']}°C, gefuehlt {w['feels_like']}°C, {w['description']}"
+        if session_weather:
+            weather_block += f" (aktueller Standort von {USER_NAME})"
 
     task_block = ""
     if TASKS_INFO:
@@ -235,7 +299,7 @@ Wenn {USER_ADDRESS} nach Wochentag, Datum, Monat, Jahr oder Uhrzeit fragt, nutze
 ==={profile_block}{home_block}"""
 
 
-def get_system_prompt():
+def get_system_prompt(session_id: str | None = None):
     # German locale-independent date formatting — we build the string
     # manually so the output is always correct German regardless of
     # whether the macOS de_DE locale is installed and set.
@@ -248,7 +312,7 @@ def get_system_prompt():
     month = months_de[now.tm_mon - 1]
     date_long = f"{weekday}, der {now.tm_mday}. {month} {now.tm_year}"
     return (
-        build_system_prompt()
+        build_system_prompt(session_id)
         .replace("{time}", time.strftime("%H:%M"))
         .replace("{date_long}", date_long)
     )
@@ -372,7 +436,7 @@ async def process_message(session_id: str, user_text: str, ws: WebSocket):
     response = await ai.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=400,
-        system=get_system_prompt(),
+        system=get_system_prompt(session_id),
         messages=history,
     )
     reply = response.content[0].text
@@ -447,6 +511,37 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             data = await ws.receive_json()
+
+            # Mobile geolocation handshake. The iPhone frontend sends
+            # this BEFORE the first "Jarvis activate" message so that
+            # build_system_prompt already has the override ready when
+            # the greeting is generated.
+            if data.get("type") == "location":
+                try:
+                    lat = float(data.get("lat"))
+                    lon = float(data.get("lon"))
+                except (TypeError, ValueError):
+                    print(f"[jarvis] Invalid location payload: {data}", flush=True)
+                    continue
+                # wttr.in lookup is a blocking urllib call — push it to
+                # a thread so we don't stall the event loop if the API
+                # is slow.
+                weather = await asyncio.to_thread(get_weather_for_coords_sync, lat, lon)
+                if weather:
+                    session_context[session_id] = {
+                        "weather": weather,
+                        "city": weather.get("city"),
+                    }
+                    print(
+                        f"[jarvis] Location override: {weather.get('city')} "
+                        f"({lat:.4f},{lon:.4f}) -> {weather['temp']}°C "
+                        f"{weather['description']}",
+                        flush=True,
+                    )
+                else:
+                    print(f"[jarvis] Location {lat},{lon} — weather lookup failed", flush=True)
+                continue
+
             user_text = data.get("text", "").strip()
             if not user_text:
                 continue
@@ -456,6 +551,7 @@ async def websocket_endpoint(ws: WebSocket):
 
     except WebSocketDisconnect:
         conversations.pop(session_id, None)
+        session_context.pop(session_id, None)
 
 
 # Static files — wrapped with a no-cache middleware so iOS Safari /
