@@ -1,8 +1,8 @@
 """
-Home Assistant read-only client for Jarvis.
+Home Assistant client for Jarvis.
 
 Talks to a Home Assistant instance (typically via Nabu Casa Cloud) using
-a Long-Lived Access Token. Exposes three async helpers:
+a Long-Lived Access Token. Exposes these async helpers:
 
 - get_dashboard_status()  -> compact dict/string snapshot of all curated
                              entities, used both at startup (system prompt)
@@ -11,6 +11,12 @@ a Long-Lived Access Token. Exposes three async helpers:
 - search_entities(query)  -> keyword filter over the curated entity list,
                              returns a list of (entity_id, friendly_name,
                              state) tuples.
+- list_lights()           -> all light.* entities discovered via /api/states
+                             (used for the LIGHT action + system prompt).
+- control_light(...)      -> turn a light on/off/toggle, set brightness,
+                             set color / color temperature.
+- call_service(...)       -> low-level HA service call (used by control_light
+                             and usable for future write integrations).
 
 The token is read from the HOMEASSISTANT_TOKEN environment variable. The
 base URL and the curated entity list live in config.json. If either is
@@ -18,7 +24,10 @@ missing, the helpers degrade gracefully: get_dashboard_status() returns
 "" so the system prompt simply omits the block, and get_entity() returns
 an {"error": ...} dict.
 
-LEVEL B (read-only): no services are called, no state is ever changed.
+Read-path (dashboard, search) covers the curated entity list. Write-path
+(control_light, call_service) targets the light.* domain for Philips Hue
+integration — Jarvis can now actually turn lights on/off, dim them, and
+change colours.
 """
 
 from __future__ import annotations
@@ -40,6 +49,54 @@ import httpx
 # shrinking to ~8 after the first "Jarvis activate" refresh). Fix:
 # keep one AsyncClient per loop and create it lazily on first use.
 _clients: dict[int, httpx.AsyncClient] = {}
+
+
+# Named colours Jarvis understands when the user says "mach das Wohnzimmer
+# blau" etc. Maps to RGB triplets for HA's light.turn_on service. German
+# and English aliases both resolve to the same tuple so Claude Haiku can
+# emit either form without us having to canonicalise first.
+LIGHT_COLOR_MAP: dict[str, tuple[int, int, int]] = {
+    "rot": (255, 0, 0),
+    "red": (255, 0, 0),
+    "gruen": (0, 255, 0),
+    "grün": (0, 255, 0),
+    "green": (0, 255, 0),
+    "blau": (0, 0, 255),
+    "blue": (0, 0, 255),
+    "gelb": (255, 220, 0),
+    "yellow": (255, 220, 0),
+    "orange": (255, 140, 0),
+    "pink": (255, 20, 147),
+    "magenta": (255, 0, 255),
+    "lila": (148, 0, 211),
+    "purple": (148, 0, 211),
+    "violett": (138, 43, 226),
+    "violet": (138, 43, 226),
+    "tuerkis": (0, 200, 200),
+    "türkis": (0, 200, 200),
+    "turquoise": (0, 200, 200),
+    "cyan": (0, 255, 255),
+    "weiss": (255, 255, 255),
+    "weiß": (255, 255, 255),
+    "white": (255, 255, 255),
+}
+
+# Colour-temperature keywords. Values are Kelvin — warm ≈ candle-ish,
+# neutral ≈ paper-white, cool ≈ daylight. Hue bulbs clamp to their
+# supported range automatically.
+LIGHT_COLOR_TEMP_MAP: dict[str, int] = {
+    "warm": 2200,
+    "warmweiss": 2200,
+    "warmweiß": 2200,
+    "warmwhite": 2200,
+    "neutral": 3500,
+    "kalt": 6500,
+    "kaltweiss": 6500,
+    "kaltweiß": 6500,
+    "cool": 6500,
+    "daylight": 6500,
+    "tageslicht": 6500,
+}
 
 
 def _client() -> httpx.AsyncClient:
@@ -76,6 +133,18 @@ class HomeAssistantClient:
         resp = await _client().get(url, headers=self._headers)
         resp.raise_for_status()
         return resp.json()
+
+    async def _post(self, path: str, body: dict) -> Any:
+        url = f"{self.base_url}{path}"
+        resp = await _client().post(url, headers=self._headers, json=body)
+        resp.raise_for_status()
+        # HA returns a list of changed state dicts for service calls, or
+        # {} on no-op. We do not use it programmatically, just pass it
+        # through for callers that want to inspect it.
+        try:
+            return resp.json()
+        except Exception:
+            return {}
 
     async def get_entity(self, entity_id: str) -> dict:
         """Return raw HA state dict for a single entity, or {'error': ...}."""
@@ -324,6 +393,229 @@ class HomeAssistantClient:
             if q in eid.lower() or q in fn.lower():
                 hits.append((eid, fn, s.get("state", "")))
         return hits
+
+    # ------------------------------------------------------------------
+    # Write-path: service calls + Philips Hue lighting control
+    # ------------------------------------------------------------------
+
+    async def call_service(
+        self, domain: str, service: str, data: dict | None = None
+    ) -> dict:
+        """Call an HA service. Returns {'ok': True} or {'error': ...}.
+
+        Low-level — used by control_light and available for any future
+        write integrations (covers, switches, media_player, ...).
+        """
+        if not self.configured:
+            return {"error": "Home Assistant nicht konfiguriert"}
+        try:
+            result = await self._post(
+                f"/api/services/{domain}/{service}", data or {}
+            )
+            return {"ok": True, "result": result}
+        except httpx.HTTPStatusError as e:
+            return {
+                "error": f"HTTP {e.response.status_code}: "
+                f"{e.response.text[:200]}"
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def list_lights(self) -> list[dict]:
+        """Return every light.* entity HA knows about, as flat dicts.
+
+        Uses /api/states rather than the curated list, because Philips
+        Hue exposes a lot of individual bulbs + rooms, and users almost
+        never want to hand-curate each one. Missing / unavailable lights
+        are skipped.
+        """
+        if not self.configured:
+            return []
+        all_states = await self.get_all_states()
+        out: list[dict] = []
+        for s in all_states:
+            eid = s.get("entity_id", "")
+            if not eid.startswith("light."):
+                continue
+            state = s.get("state", "")
+            if state in ("unavailable", "unknown"):
+                continue
+            attrs = s.get("attributes", {}) or {}
+            out.append(
+                {
+                    "entity_id": eid,
+                    "friendly_name": attrs.get("friendly_name") or eid,
+                    "state": state,
+                    "brightness": attrs.get("brightness"),  # 0-255 or None
+                    "supported_color_modes": attrs.get(
+                        "supported_color_modes", []
+                    ),
+                }
+            )
+        out.sort(key=lambda x: x["friendly_name"].lower())
+        return out
+
+    async def control_light(
+        self,
+        entity_id: str,
+        state: str = "on",
+        brightness_pct: int | None = None,
+        rgb_color: tuple[int, int, int] | list[int] | None = None,
+        color_temp_kelvin: int | None = None,
+    ) -> dict:
+        """Turn a light on/off/toggle with optional brightness and colour.
+
+        Arguments:
+            entity_id: e.g. "light.wohnzimmer" or the literal string "all"
+                       to target every light in the house.
+            state:     "on", "off", or "toggle".
+            brightness_pct: 0-100, clamped.
+            rgb_color: (r, g, b), each 0-255.
+            color_temp_kelvin: e.g. 2200 (warm) .. 6500 (cool).
+        """
+        state = (state or "on").lower()
+
+        # "all" expands to every light we can see — HA does accept
+        # entity_id="all" for service calls targeting a single domain,
+        # but passing an explicit list is more predictable and works
+        # even on older HA core versions.
+        if entity_id == "all":
+            lights = await self.list_lights()
+            if not lights:
+                return {"error": "Keine Lampen gefunden."}
+            target_entity: str | list[str] = [l["entity_id"] for l in lights]
+        else:
+            target_entity = entity_id
+
+        data: dict[str, Any] = {"entity_id": target_entity}
+
+        if state == "off":
+            return await self.call_service("light", "turn_off", data)
+
+        service = "toggle" if state == "toggle" else "turn_on"
+
+        if brightness_pct is not None:
+            data["brightness_pct"] = max(0, min(100, int(brightness_pct)))
+        if rgb_color is not None:
+            data["rgb_color"] = [
+                max(0, min(255, int(c))) for c in list(rgb_color)[:3]
+            ]
+        if color_temp_kelvin is not None:
+            data["color_temp_kelvin"] = int(color_temp_kelvin)
+
+        return await self.call_service("light", service, data)
+
+
+def parse_light_payload(payload: str) -> dict:
+    """Parse the payload of an [ACTION:LIGHT] tag.
+
+    The grammar is intentionally tolerant so Claude Haiku can produce it
+    without a strict schema. Example payloads:
+
+        light.wohnzimmer on
+        light.wohnzimmer on 80
+        light.wohnzimmer 80
+        light.wohnzimmer off
+        light.wohnzimmer on rot
+        light.wohnzimmer on warm 50
+        all off
+
+    Returns a dict with keys: entity_id, state, brightness_pct, rgb_color,
+    color_temp_kelvin, error. Any field may be None.
+    """
+    tokens = (payload or "").strip().split()
+    result: dict[str, Any] = {
+        "entity_id": None,
+        "state": None,
+        "brightness_pct": None,
+        "rgb_color": None,
+        "color_temp_kelvin": None,
+        "error": None,
+    }
+    if not tokens:
+        result["error"] = "Leere Licht-Anweisung."
+        return result
+
+    first = tokens[0].lower().strip(",:")
+    if first in ("all", "alle", "alles"):
+        result["entity_id"] = "all"
+    elif first.startswith("light."):
+        result["entity_id"] = first
+    else:
+        result["error"] = f"Unbekannte Lampen-ID: {tokens[0]}"
+        return result
+
+    on_words = {"on", "an", "ein", "anschalten", "einschalten"}
+    off_words = {"off", "aus", "ausschalten", "abschalten"}
+    toggle_words = {"toggle", "umschalten", "wechseln"}
+
+    for tok in tokens[1:]:
+        tl = tok.lower().strip(",:%")
+        if not tl:
+            continue
+        if tl in on_words:
+            result["state"] = "on"
+            continue
+        if tl in off_words:
+            result["state"] = "off"
+            continue
+        if tl in toggle_words:
+            result["state"] = "toggle"
+            continue
+        # Brightness as a bare integer (0-100).
+        if tl.isdigit():
+            n = int(tl)
+            if 0 <= n <= 100:
+                result["brightness_pct"] = n
+                continue
+        # Named colour.
+        if tl in LIGHT_COLOR_MAP:
+            result["rgb_color"] = LIGHT_COLOR_MAP[tl]
+            continue
+        # Colour temperature keyword.
+        if tl in LIGHT_COLOR_TEMP_MAP:
+            result["color_temp_kelvin"] = LIGHT_COLOR_TEMP_MAP[tl]
+            continue
+        # Unknown token — ignore silently so a stray word doesn't break
+        # the whole command.
+
+    # If the user only passed a brightness / colour, assume they meant
+    # "turn on with this setting". If they passed nothing at all, default
+    # to "on".
+    if result["state"] is None:
+        result["state"] = "on"
+
+    return result
+
+
+def format_lights_for_prompt(lights: list[dict]) -> str:
+    """Render a list of lights as a compact multi-line string for the
+    system prompt. Each line shows entity_id, friendly name, and current
+    state so Jarvis can match spoken-room references to entity_ids.
+    """
+    if not lights:
+        return ""
+    parts: list[str] = []
+    for l in lights:
+        eid = l["entity_id"]
+        name = l["friendly_name"]
+        state = l.get("state", "")
+        if state == "on":
+            bri = l.get("brightness")
+            if bri is not None:
+                try:
+                    pct = int(round(int(bri) / 255 * 100))
+                    state_str = f"an {pct}%"
+                except (TypeError, ValueError):
+                    state_str = "an"
+            else:
+                state_str = "an"
+        elif state == "off":
+            state_str = "aus"
+        else:
+            state_str = state or "?"
+        parts.append(f"- {eid} ({name}) — {state_str}")
+    return "\n".join(parts)
 
 
 def build_client_from_config(config: dict) -> HomeAssistantClient:

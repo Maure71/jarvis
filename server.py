@@ -184,15 +184,33 @@ def _log_refresh():
     print(f"[jarvis] Tasks: {len(TASKS_INFO)} geladen", flush=True)
     print(f"[jarvis] Profil: {len(PROFILE_INFO)} Zeichen geladen", flush=True)
     print(f"[jarvis] Home Assistant: {len(HOME_INFO)} Zeichen geladen", flush=True)
+    print(f"[jarvis] Lampen: {len(LIGHTS_INFO)} gefunden", flush=True)
+
+
+def get_lights_sync():
+    """Fetch all Philips Hue / HA light entities (sync wrapper).
+
+    Only safe at module-load time — uses asyncio.run(). Inside a running
+    loop use `await ha_client.list_lights()` directly, same pattern as
+    get_home_sync / refresh_data_async.
+    """
+    if not ha_client.configured:
+        return []
+    try:
+        return asyncio.run(ha_client.list_lights())
+    except Exception as e:
+        print(f"[jarvis] Lights load error: {e}", flush=True)
+        return []
 
 
 def refresh_data():
     """Sync refresh — for the initial module-load call only."""
-    global WEATHER_INFO, TASKS_INFO, PROFILE_INFO, HOME_INFO
+    global WEATHER_INFO, TASKS_INFO, PROFILE_INFO, HOME_INFO, LIGHTS_INFO
     WEATHER_INFO = get_weather_sync()
     TASKS_INFO = get_tasks_sync()
     PROFILE_INFO = get_profile_sync()
     HOME_INFO = get_home_sync()
+    LIGHTS_INFO = get_lights_sync()
     _log_refresh()
 
 
@@ -202,7 +220,7 @@ async def refresh_data_async():
     Uses `await` directly on the HA client instead of asyncio.run(), which
     would raise 'cannot be called from a running event loop'.
     """
-    global WEATHER_INFO, TASKS_INFO, PROFILE_INFO, HOME_INFO
+    global WEATHER_INFO, TASKS_INFO, PROFILE_INFO, HOME_INFO, LIGHTS_INFO
     WEATHER_INFO = get_weather_sync()
     TASKS_INFO = get_tasks_sync()
     PROFILE_INFO = get_profile_sync()
@@ -212,14 +230,21 @@ async def refresh_data_async():
         except Exception as e:
             print(f"[jarvis] HA load error: {e}", flush=True)
             HOME_INFO = ""
+        try:
+            LIGHTS_INFO = await ha_client.list_lights()
+        except Exception as e:
+            print(f"[jarvis] Lights load error: {e}", flush=True)
+            LIGHTS_INFO = []
     else:
         HOME_INFO = ""
+        LIGHTS_INFO = []
     _log_refresh()
 
 WEATHER_INFO = ""
 TASKS_INFO = []
 PROFILE_INFO = ""
 HOME_INFO = ""
+LIGHTS_INFO: list[dict] = []
 refresh_data()
 
 # Action parsing
@@ -276,6 +301,15 @@ def build_system_prompt(session_id: str | None = None):
             "=== ENDE SMART HOME ==="
         )
 
+    lights_block = ""
+    if LIGHTS_INFO:
+        lights_rendered = home_assistant.format_lights_for_prompt(LIGHTS_INFO)
+        lights_block = (
+            "\n\n=== BELEUCHTUNG (Philips Hue via Home Assistant) ===\n"
+            f"{lights_rendered}\n"
+            "=== ENDE BELEUCHTUNG ==="
+        )
+
     return f"""Du bist Jarvis, der KI-Assistent von Tony Stark aus Iron Man. Dein Dienstherr ist {USER_NAME}. Du sprichst ausschliesslich Deutsch. {USER_NAME} moechte mit "{USER_ADDRESS}" angesprochen und gesiezt werden. Nutze "Sie" als Pronomen — FALSCH: "{USER_ADDRESS} planen", RICHTIG: "Sie planen, {USER_ADDRESS}". Dein Ton ist trocken, sarkastisch und britisch-hoeflich - wie ein Butler der alles gesehen hat und trotzdem loyal bleibt. Du machst subtile, trockene Bemerkungen, bist aber niemals respektlos. Wenn {USER_ADDRESS} eine offensichtliche Frage stellt, darfst du mit elegantem Sarkasmus antworten. Du bist hochintelligent, effizient und immer einen Schritt voraus. Halte deine Antworten kurz - maximal 3 Saetze. Du kommentierst fragwuerdige Entscheidungen hoeflich aber spitz.
 
 Du kennst {USER_NAME} gut — nutze das PROFIL unten, um Fragen konkret zu beantworten. Wenn {USER_NAME} nach etwas fragt, das im Profil steht (Familie, Firmen, Haus, Fahrzeuge, Smart Home, Projekte), beziehe dich darauf, als waere es selbstverstaendlich — du bist schliesslich sein Butler. Erfinde NICHTS, was nicht im Profil steht.
@@ -294,6 +328,15 @@ AKTIONEN - Schreibe die passende Aktion ans ENDE deiner Antwort. Der Text VOR de
 [ACTION:HOME] - Kompletten Smart Home Dashboard-Status aus Home Assistant abrufen (Solar, PV, Wallbox, Pool, Fahrzeuge, Alarm, Anwesenheit, Klima, Garten). Schreibe die Aktion EXAKT so: "[ACTION:HOME]" — KEINE weiteren Zeichen dahinter, KEINE Platzhalter wie <blank> oder <empty>, KEINE neue Zeile mit Inhalt, einfach nur die Aktion.
 [ACTION:HOME] suchbegriff - Nur passende Sensoren abrufen. Beispiele: "[ACTION:HOME] pool", "[ACTION:HOME] volvo", "[ACTION:HOME] solar". Nutze die Variante mit Suchbegriff, wenn {USER_NAME} nach einem bestimmten Bereich fragt.
 Nutze diese Aktion bei Fragen nach Solar, PV, Batterie, Wallbox, Pool, Garten, Bewässerung, Auto/Fahrzeug-Akku, Alarm, ob jemand zu Hause ist, CO2, Außentemperatur oder Smart Home allgemein. Der aktuelle Stand steht unten auch schon im Block SMART HOME STATUS — bei einfachen Fragen kannst du direkt daraus antworten, bei detaillierten oder Live-Fragen nutze die Aktion fuer frische Daten.
+[ACTION:LIGHT] entity aktion [helligkeit|farbe] - Philips Hue Beleuchtung steuern. Du HAST die volle Kontrolle ueber alle Lampen im Block BELEUCHTUNG unten. Wenn {USER_ADDRESS} dich bittet Licht an-/auszumachen, zu dimmen oder eine Farbe einzustellen, TUE ES SOFORT per Aktion — frag nicht erst. Nimm die exakte entity_id aus dem Block BELEUCHTUNG.
+Beispiele:
+  "[ACTION:LIGHT] light.wohnzimmer on 80"    - Wohnzimmer auf 80% einschalten
+  "[ACTION:LIGHT] light.kueche off"           - Kueche ausschalten
+  "[ACTION:LIGHT] light.schlafzimmer on warm" - Schlafzimmer warmweiss
+  "[ACTION:LIGHT] light.wohnzimmer on blau"   - Wohnzimmer blau
+  "[ACTION:LIGHT] light.esszimmer toggle"     - Esszimmer umschalten
+  "[ACTION:LIGHT] all off"                    - ALLE Lampen aus
+Helligkeit als Zahl 0-100 (ohne %-Zeichen). Farben: rot, gruen, blau, gelb, orange, pink, lila, tuerkis, weiss. Farbtemperatur: warm, neutral, kalt. Schreibe einen kurzen Butler-Kommentar davor ("Sehr wohl, {USER_ADDRESS}." o.ae.), dann die Aktion.
 
 WENN {USER_NAME} "Jarvis activate" sagt:
 - Begruesse ihn passend zur Tageszeit (aktuelle Zeit: {{time}}).
@@ -306,7 +349,7 @@ Heute ist {{date_long}}. Die aktuelle Uhrzeit ist {{time}} Uhr.
 Wenn {USER_ADDRESS} nach Wochentag, Datum, Monat, Jahr oder Uhrzeit fragt, nutze AUSSCHLIESSLICH diese Werte. Verlasse dich niemals auf dein internes Wissen oder Trainings-Daten fuer Zeitangaben — die sind veraltet.
 
 === AKTUELLE DATEN ==={weather_block}{task_block}
-==={profile_block}{home_block}"""
+==={profile_block}{home_block}{lights_block}"""
 
 
 def get_system_prompt(session_id: str | None = None):
@@ -407,6 +450,43 @@ async def execute_action(action: dict) -> str:
         result = await browser_tools.fetch_news()
         return result
 
+    elif t == "LIGHT":
+        # Philips Hue control via Home Assistant service calls. Parse the
+        # payload into a normalised dict (entity, state, brightness, rgb,
+        # color_temp), then call control_light. After the call we refresh
+        # LIGHTS_INFO so the next system prompt reflects reality.
+        global LIGHTS_INFO
+        if not ha_client.configured:
+            return "Home Assistant ist nicht konfiguriert, ich kann das Licht leider nicht steuern."
+        parsed = home_assistant.parse_light_payload(p)
+        if parsed.get("error"):
+            return parsed["error"]
+        result = await ha_client.control_light(
+            entity_id=parsed["entity_id"],
+            state=parsed["state"],
+            brightness_pct=parsed["brightness_pct"],
+            rgb_color=parsed["rgb_color"],
+            color_temp_kelvin=parsed["color_temp_kelvin"],
+        )
+        if "error" in result:
+            return f"Licht-Steuerung fehlgeschlagen: {result['error']}"
+        # Refresh cached light states so the next prompt is consistent
+        # with what actually happened. Best-effort; not fatal on failure.
+        try:
+            LIGHTS_INFO = await ha_client.list_lights()
+        except Exception:
+            pass
+        # Human-readable confirmation for the summariser.
+        bits: list[str] = [f"Lampe {parsed['entity_id']}"]
+        bits.append({"on": "eingeschaltet", "off": "ausgeschaltet", "toggle": "umgeschaltet"}.get(parsed["state"], parsed["state"]))
+        if parsed["brightness_pct"] is not None:
+            bits.append(f"auf {parsed['brightness_pct']}% Helligkeit")
+        if parsed["rgb_color"] is not None:
+            bits.append(f"Farbe RGB {parsed['rgb_color']}")
+        if parsed["color_temp_kelvin"] is not None:
+            bits.append(f"Farbtemperatur {parsed['color_temp_kelvin']} K")
+        return " ".join(bits) + "."
+
     elif t == "HOME":
         # Optional payload = search query. Empty payload = full dashboard.
         # Defensive parsing: Claude Haiku sometimes emits literal placeholder
@@ -486,8 +566,24 @@ async def process_message(session_id: str, user_text: str, ws: WebSocket):
             print(f"  Action error: {e}", flush=True)
             action_result = f"Fehler: {e}"
 
-        if action["type"] == "OPEN":
-            # Just opened browser, nothing to summarize
+        if action["type"] in ("OPEN", "LIGHT"):
+            # OPEN just pops a URL into the browser, LIGHT just flipped a
+            # switch — both are side-effects the user already heard us
+            # acknowledge via the pre-action spoken text. No summary.
+            # On LIGHT errors we still want feedback, so speak those.
+            if action["type"] == "LIGHT" and (
+                "fehlgeschlagen" in action_result.lower()
+                or "nicht konfiguriert" in action_result.lower()
+            ):
+                err_audio = await synthesize_speech(action_result)
+                conversations[session_id].append(
+                    {"role": "assistant", "content": action_result}
+                )
+                await ws.send_json({
+                    "type": "response",
+                    "text": action_result,
+                    "audio": base64.b64encode(err_audio).decode("utf-8") if err_audio else "",
+                })
             return
 
         # SEARCH, BROWSE, SCREEN — summarize results
