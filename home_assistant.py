@@ -23,14 +23,36 @@ LEVEL B (read-only): no services are called, no state is ever changed.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
 import httpx
 
-# Shared httpx client. Home Assistant via Nabu Casa Cloud can be slow on
-# cold connections, so give it a generous timeout.
-_http = httpx.AsyncClient(timeout=15)
+# Per-event-loop httpx client. httpx.AsyncClient is not safe to share
+# across event loops (the connection pool is bound to the loop that
+# created it), and Jarvis creates multiple loops over its lifetime:
+#   1. The synchronous startup refresh uses asyncio.run() which creates
+#      a short-lived loop that gets closed immediately.
+#   2. uvicorn then starts its own long-lived main loop for serving.
+# Sharing a single module-level AsyncClient between those causes some
+# parallel requests to fail silently (we observed 29 curated entities
+# shrinking to ~8 after the first "Jarvis activate" refresh). Fix:
+# keep one AsyncClient per loop and create it lazily on first use.
+_clients: dict[int, httpx.AsyncClient] = {}
+
+
+def _client() -> httpx.AsyncClient:
+    """Return an httpx.AsyncClient bound to the current running loop."""
+    loop = asyncio.get_running_loop()
+    key = id(loop)
+    client = _clients.get(key)
+    if client is None or client.is_closed:
+        # Home Assistant via Nabu Casa Cloud can be slow on cold
+        # connections, so give it a generous timeout.
+        client = httpx.AsyncClient(timeout=15)
+        _clients[key] = client
+    return client
 
 
 class HomeAssistantClient:
@@ -51,7 +73,7 @@ class HomeAssistantClient:
 
     async def _get(self, path: str) -> Any:
         url = f"{self.base_url}{path}"
-        resp = await _http.get(url, headers=self._headers)
+        resp = await _client().get(url, headers=self._headers)
         resp.raise_for_status()
         return resp.json()
 

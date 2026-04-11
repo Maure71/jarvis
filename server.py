@@ -112,7 +112,13 @@ def get_profile_sync():
 
 
 def get_home_sync():
-    """Fetch a compact Home Assistant dashboard snapshot (sync wrapper)."""
+    """Fetch a compact Home Assistant dashboard snapshot (sync wrapper).
+
+    ONLY safe to call at module-load time, where no event loop is running
+    yet. Inside async handlers (e.g. the WebSocket message loop) use
+    refresh_data_async() / await ha_client.get_dashboard_status() instead,
+    because asyncio.run() cannot be called from a running event loop.
+    """
     if not ha_client.configured:
         return ""
     try:
@@ -122,17 +128,42 @@ def get_home_sync():
         return ""
 
 
+def _log_refresh():
+    print(f"[jarvis] Wetter: {WEATHER_INFO}", flush=True)
+    print(f"[jarvis] Tasks: {len(TASKS_INFO)} geladen", flush=True)
+    print(f"[jarvis] Profil: {len(PROFILE_INFO)} Zeichen geladen", flush=True)
+    print(f"[jarvis] Home Assistant: {len(HOME_INFO)} Zeichen geladen", flush=True)
+
+
 def refresh_data():
-    """Refresh weather, tasks, profile and Home Assistant dashboard."""
+    """Sync refresh — for the initial module-load call only."""
     global WEATHER_INFO, TASKS_INFO, PROFILE_INFO, HOME_INFO
     WEATHER_INFO = get_weather_sync()
     TASKS_INFO = get_tasks_sync()
     PROFILE_INFO = get_profile_sync()
     HOME_INFO = get_home_sync()
-    print(f"[jarvis] Wetter: {WEATHER_INFO}", flush=True)
-    print(f"[jarvis] Tasks: {len(TASKS_INFO)} geladen", flush=True)
-    print(f"[jarvis] Profil: {len(PROFILE_INFO)} Zeichen geladen", flush=True)
-    print(f"[jarvis] Home Assistant: {len(HOME_INFO)} Zeichen geladen", flush=True)
+    _log_refresh()
+
+
+async def refresh_data_async():
+    """Async refresh — safe to call from inside a running event loop
+    (e.g. the WebSocket handler when the user says 'Jarvis activate').
+    Uses `await` directly on the HA client instead of asyncio.run(), which
+    would raise 'cannot be called from a running event loop'.
+    """
+    global WEATHER_INFO, TASKS_INFO, PROFILE_INFO, HOME_INFO
+    WEATHER_INFO = get_weather_sync()
+    TASKS_INFO = get_tasks_sync()
+    PROFILE_INFO = get_profile_sync()
+    if ha_client.configured:
+        try:
+            HOME_INFO = await ha_client.get_dashboard_status()
+        except Exception as e:
+            print(f"[jarvis] HA load error: {e}", flush=True)
+            HOME_INFO = ""
+    else:
+        HOME_INFO = ""
+    _log_refresh()
 
 WEATHER_INFO = ""
 TASKS_INFO = []
@@ -184,7 +215,9 @@ AKTIONEN - Schreibe die passende Aktion ans ENDE deiner Antwort. Der Text VOR de
 [ACTION:OPEN] url - URL im Browser oeffnen
 [ACTION:SCREEN] - Bildschirm ansehen und beschreiben. WICHTIG: Bei SCREEN schreibe NUR die Aktion, KEINEN Text davor. Also NUR "[ACTION:SCREEN]" und sonst nichts.
 [ACTION:NEWS] - Aktuelle Weltnachrichten abrufen. Nutze diese Aktion wenn nach News, Nachrichten, was in der Welt passiert, aktuelle Lage oder Weltgeschehen gefragt wird. Schreibe einen kurzen Satz davor wie "Ich schaue nach den aktuellen Nachrichten."
-[ACTION:HOME] suchbegriff - Smart Home Status aus Home Assistant abrufen. Ohne Suchbegriff bekommst du den kompletten Dashboard-Status (Solar, Wallbox, Pool, Fahrzeuge, Alarm, Anwesenheit). Mit Suchbegriff (z.B. "pool" oder "volvo") nur die passenden Sensoren. Nutze diese Aktion bei Fragen nach Solar, PV, Batterie, Wallbox, Pool, Garten, Bewässerung, Auto/Fahrzeug-Akku, Alarm, ob jemand zu Hause ist, CO2, Außentemperatur oder Smart Home allgemein. Der aktuelle Stand steht unten auch schon im Block SMART HOME STATUS — bei einfachen Fragen kannst du direkt daraus antworten, bei detaillierten Fragen nutze die Aktion fuer frische Daten.
+[ACTION:HOME] - Kompletten Smart Home Dashboard-Status aus Home Assistant abrufen (Solar, PV, Wallbox, Pool, Fahrzeuge, Alarm, Anwesenheit, Klima, Garten). Schreibe die Aktion EXAKT so: "[ACTION:HOME]" — KEINE weiteren Zeichen dahinter, KEINE Platzhalter wie <blank> oder <empty>, KEINE neue Zeile mit Inhalt, einfach nur die Aktion.
+[ACTION:HOME] suchbegriff - Nur passende Sensoren abrufen. Beispiele: "[ACTION:HOME] pool", "[ACTION:HOME] volvo", "[ACTION:HOME] solar". Nutze die Variante mit Suchbegriff, wenn {USER_NAME} nach einem bestimmten Bereich fragt.
+Nutze diese Aktion bei Fragen nach Solar, PV, Batterie, Wallbox, Pool, Garten, Bewässerung, Auto/Fahrzeug-Akku, Alarm, ob jemand zu Hause ist, CO2, Außentemperatur oder Smart Home allgemein. Der aktuelle Stand steht unten auch schon im Block SMART HOME STATUS — bei einfachen Fragen kannst du direkt daraus antworten, bei detaillierten oder Live-Fragen nutze die Aktion fuer frische Daten.
 
 WENN {USER_NAME} "Jarvis activate" sagt:
 - Begruesse ihn passend zur Tageszeit (aktuelle Zeit: {{time}}).
@@ -192,12 +225,31 @@ WENN {USER_NAME} "Jarvis activate" sagt:
 - Fasse die Aufgaben kurz als Ueberblick in einem Satz zusammen, ohne dabei jede einzelne Aufgabe einfach vorzulesen. Gebe gerne einen humorvollen Kommentar am Ende an.
 - Sei kreativ bei der Begruessung.
 
+AKTUELLES DATUM UND UHRZEIT (NICHT RATEN!):
+Heute ist {{date_long}}. Die aktuelle Uhrzeit ist {{time}} Uhr.
+Wenn {USER_ADDRESS} nach Wochentag, Datum, Monat, Jahr oder Uhrzeit fragt, nutze AUSSCHLIESSLICH diese Werte. Verlasse dich niemals auf dein internes Wissen oder Trainings-Daten fuer Zeitangaben — die sind veraltet.
+
 === AKTUELLE DATEN ==={weather_block}{task_block}
 ==={profile_block}{home_block}"""
 
 
 def get_system_prompt():
-    return build_system_prompt().replace("{time}", time.strftime("%H:%M"))
+    # German locale-independent date formatting — we build the string
+    # manually so the output is always correct German regardless of
+    # whether the macOS de_DE locale is installed and set.
+    now = time.localtime()
+    weekdays_de = ["Montag", "Dienstag", "Mittwoch", "Donnerstag",
+                   "Freitag", "Samstag", "Sonntag"]
+    months_de = ["Januar", "Februar", "März", "April", "Mai", "Juni",
+                 "Juli", "August", "September", "Oktober", "November", "Dezember"]
+    weekday = weekdays_de[now.tm_wday]
+    month = months_de[now.tm_mon - 1]
+    date_long = f"{weekday}, der {now.tm_mday}. {month} {now.tm_year}"
+    return (
+        build_system_prompt()
+        .replace("{time}", time.strftime("%H:%M"))
+        .replace("{date_long}", date_long)
+    )
 
 
 def extract_action(text: str):
@@ -281,10 +333,17 @@ async def execute_action(action: dict) -> str:
 
     elif t == "HOME":
         # Optional payload = search query. Empty payload = full dashboard.
-        if p:
-            hits = await ha_client.search_entities(p)
+        # Defensive parsing: Claude Haiku sometimes emits literal placeholder
+        # tokens like "<blank>" / "<empty>" / "-" / "none" when the prompt
+        # says "ohne Suchbegriff". Treat all of these as an empty payload so
+        # we return the full dashboard instead of a "Keine Sensoren" error.
+        query = (p or "").strip().strip("<>").strip().lower()
+        if query in ("", "blank", "empty", "none", "null", "-", "—", "leer"):
+            query = ""
+        if query:
+            hits = await ha_client.search_entities(query)
             if not hits:
-                return f"Keine Sensoren zu '{p}' gefunden."
+                return f"Keine Sensoren zu '{query}' gefunden."
             return "\n".join(
                 f"{fn or eid}: {state}" for eid, fn, state in hits
             )
@@ -299,9 +358,10 @@ async def process_message(session_id: str, user_text: str, ws: WebSocket):
     if session_id not in conversations:
         conversations[session_id] = []
 
-    # Refresh weather + tasks on activate
+    # Refresh weather + tasks on activate. Use the async variant because
+    # we're inside a running event loop — asyncio.run() would raise here.
     if "activate" in user_text.lower():
-        refresh_data()
+        await refresh_data_async()
 
     conversations[session_id].append({"role": "user", "content": user_text})
     history = conversations[session_id][-16:]
