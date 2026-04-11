@@ -98,3 +98,93 @@ body {
     margin-bottom: 16px;
     font-size: 14px;
 }
+
+#chat-form {
+    max-width: 600px;
+    margin: 20px auto 0 auto;
+    padding: 0 20px calc(20px + env(safe-area-inset-bottom, 0px)) 20px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+#chat-input {
+    flex: 1;
+    min-width: 0;
+    background: #14141c;
+    border: 1px solid #2a2a38;
+    color: #e0e0e0;
+    font-family: inherit;
+    font-size: 16px;
+    padding: 12px 16px;
+    border-radius: 24px;
+    outline: none;
+    transition: border-color 0.2s ease, background 0.2s ease;
+    /* Prevent iOS auto-zoom on focus: font-size must be >= 16px */
+    -webkit-appearance: none;
+}
+
+#chat-input::placeholder {
+    color: #555;
+}
+
+#chat-input:focus {
+    border-color: #4a9eff;
+    background: #181822;
+}
+
+#chat-send {
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: #1a3a5c;
+    color: #e0e0e0;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.1s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#chat-send:hover {
+    background: #2a6cb8;
+}
+
+#chat-send:active {
+    transform: scale(0.92);
+}
+
+#chat-send:disabled {
+    background: #14141c;
+    color: #444;
+    cursor: not-allowed;
+}
+
+/* On narrow screens (iPhone), pin the input to the bottom so the
+   on-screen keyboard stays docked to it and the transcript scrolls
+   above. */
+@media (max-width: 700px) {
+    body {
+        align-items: stretch;
+    }
+    #app {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        padding-top: 20px;
+    }
+    #orb-container {
+        margin-bottom: 20px;
+    }
+    #transcript {
+        flex: 1;
+        max-height: none;
+    }
+    #chat-form {
+        margin-top: auto;
+    }
+}

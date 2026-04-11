@@ -2,6 +2,9 @@
 const orb = document.getElementById('orb');
 const status = document.getElementById('status');
 const transcript = document.getElementById('transcript');
+const chatForm = document.getElementById('chat-form');
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
 
 let ws;
 let audioQueue = [];
@@ -146,6 +149,10 @@ if (SpeechRecognition) {
 
 function startListening() {
     if (isPlaying) return;
+    // Don't hijack the mic while the user is typing in the chat input
+    // — it would compete with the keyboard for attention and risk
+    // sending a spoken transcript on top of a half-typed message.
+    if (document.activeElement === chatInput) return;
     try {
         recognition.start();
         isListening = true;
@@ -172,7 +179,16 @@ orb.addEventListener('click', () => {
 // Works both for manual interaction AND for the synthetic click that
 // scripts/mic_workaround.applescript injects after the clap-trigger
 // auto-launch sequence.
-const firstGesture = () => {
+//
+// Exception: ignore keystrokes that originate inside the chat input or
+// its form — the user is typing a message, not trying to start voice
+// recognition. Same for clicks on chat-form children, so focusing the
+// input doesn't grab the mic.
+const isChatTarget = (target) =>
+    target && (target === chatInput || (chatForm && chatForm.contains(target)));
+
+const firstGesture = (event) => {
+    if (isChatTarget(event.target)) return;
     document.removeEventListener('click', firstGesture);
     document.removeEventListener('keydown', firstGesture);
     if (recognition && !isListening && !isPlaying) {
@@ -181,6 +197,41 @@ const firstGesture = () => {
 };
 document.addEventListener('click', firstGesture);
 document.addEventListener('keydown', firstGesture);
+
+// Chat form: text input as an alternative to voice. Sends the same
+// {text: ...} payload over the WebSocket that voice recognition uses,
+// so the server pipeline (Claude + TTS) is identical. While the user
+// is typing we deliberately do NOT start recognition — focusing the
+// input and sending a message pauses any active listening and lets
+// Jarvis reply via audio as usual.
+if (chatForm) {
+    chatInput.addEventListener('focus', () => {
+        if (isListening) {
+            try { recognition.stop(); } catch (e) {}
+            isListening = false;
+            setOrbState('idle');
+        }
+    });
+
+    chatForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const text = chatInput.value.trim();
+        if (!text) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            status.textContent = 'Keine Verbindung — bitte neu laden.';
+            return;
+        }
+        addTranscript('user', text);
+        setOrbState('thinking');
+        status.textContent = 'Jarvis denkt nach...';
+        ws.send(JSON.stringify({ text }));
+        chatInput.value = '';
+        // Keep focus on the input so the iOS keyboard stays up for a
+        // quick follow-up message. Blur manually via tapping the orb
+        // or elsewhere.
+        chatInput.focus();
+    });
+}
 
 function setOrbState(state) { orb.className = state; }
 

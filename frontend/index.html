@@ -13,6 +13,19 @@
         </div>
         <div id="status">Klicke den Orb um zu sprechen</div>
         <div id="transcript"></div>
+        <form id="chat-form" autocomplete="off">
+            <input
+                id="chat-input"
+                type="text"
+                placeholder="Nachricht an Jarvis..."
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="sentences"
+                spellcheck="true"
+                enterkeyhint="send"
+            />
+            <button id="chat-send" type="submit" aria-label="Senden">↑</button>
+        </form>
     </div>
     <script src="/static/main.js"></script>
 </body>
