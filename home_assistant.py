@@ -183,8 +183,12 @@ class HomeAssistantClient:
             battery_parts.append(f"heute geladen {v}")
         if v := val("sensor.s10e_pro_battery_discharge_today", " kWh"):
             battery_parts.append(f"heute entladen {v}")
-        if v := val("sensor.s10e_pro_autarky_today", "%"):
-            battery_parts.append(f"Autarkie heute {v}")
+        autarky_raw = by_id.get("sensor.s10e_pro_autarky_today", {}).get("state")
+        if autarky_raw not in (None, "", "unknown", "unavailable"):
+            try:
+                battery_parts.append(f"Autarkie heute {float(autarky_raw):.1f}%")
+            except (TypeError, ValueError):
+                battery_parts.append(f"Autarkie heute {autarky_raw}%")
         if v := val("sensor.s10e_pro_installed_battery_capacity", " kWh"):
             battery_parts.append(f"Kapazität {v}")
         if battery_parts:
