@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Jarvis — Double-Clap Trigger LaunchAgent
+
+  Installs as ~/Library/LaunchAgents/com.jarvis.clap.plist and runs
+  scripts/clap_trigger.py at login. KeepAlive restarts the listener
+  after the launch script fires (the trigger exits itself after a
+  successful double-clap).
+
+  Install:
+    cp scripts/com.jarvis.clap.plist ~/Library/LaunchAgents/
+    launchctl load  ~/Library/LaunchAgents/com.jarvis.clap.plist
+
+  Stop / remove:
+    launchctl unload ~/Library/LaunchAgents/com.jarvis.clap.plist
+    rm ~/Library/LaunchAgents/com.jarvis.clap.plist
+
+  Logs:
+    tail -f /tmp/jarvis-clap.log
+    tail -f /tmp/jarvis-clap.err.log
+
+  IMPORTANT: the paths below are hardcoded for mariopustan. If you clone
+  this repo on a different Mac, copy this file to ~/Library/LaunchAgents/
+  and update the two absolute paths (.venv/bin/python and clap_trigger.py)
+  to match your $HOME.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jarvis.clap</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/mariopustan/code/jarvis/.venv/bin/python</string>
+        <string>/Users/mariopustan/code/jarvis/scripts/clap_trigger.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/mariopustan/code/jarvis</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/jarvis-clap.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/jarvis-clap.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>
