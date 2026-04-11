@@ -137,7 +137,7 @@ class HomeAssistantClient:
 
         lines: list[str] = []
 
-        # Energie
+        # Energie (PV + Netz)
         energy_parts = []
         if v := val("sensor.solar_bilanz", " kW"):
             energy_parts.append(f"PV-Bilanz {v}")
@@ -153,6 +153,42 @@ class HomeAssistantClient:
             energy_parts.append(f"Prognose heute {v}")
         if energy_parts:
             lines.append("Energie: " + ", ".join(energy_parts))
+
+        # Hausbatterie (E3DC S10E Pro)
+        # Auf einer eigenen Zeile, damit Jarvis sie bei Batterie-Fragen
+        # sofort sieht — und nicht behauptet, es gäbe keine Batterie.
+        battery_parts = []
+        soc_raw = by_id.get("sensor.s10e_pro_state_of_charge", {}).get("state")
+        if soc_raw not in (None, "", "unknown", "unavailable"):
+            battery_parts.append(f"SoC {soc_raw}%")
+        # Nur eine Richtung zeigen: entweder lädt oder entlädt, nicht
+        # beides gleichzeitig. Wenn einer > 0 kW, hat er Vorrang.
+        charge_raw = by_id.get("sensor.s10e_pro_battery_charge", {}).get("state")
+        discharge_raw = by_id.get("sensor.s10e_pro_battery_discharge", {}).get("state")
+        try:
+            charge_kw = float(charge_raw) if charge_raw not in (None, "", "unknown", "unavailable") else 0.0
+        except (TypeError, ValueError):
+            charge_kw = 0.0
+        try:
+            discharge_kw = float(discharge_raw) if discharge_raw not in (None, "", "unknown", "unavailable") else 0.0
+        except (TypeError, ValueError):
+            discharge_kw = 0.0
+        if charge_kw > 0.05:
+            battery_parts.append(f"lädt mit {charge_kw:.2f} kW")
+        elif discharge_kw > 0.05:
+            battery_parts.append(f"entlädt mit {discharge_kw:.2f} kW")
+        else:
+            battery_parts.append("idle")
+        if v := val("sensor.s10e_pro_battery_charge_today", " kWh"):
+            battery_parts.append(f"heute geladen {v}")
+        if v := val("sensor.s10e_pro_battery_discharge_today", " kWh"):
+            battery_parts.append(f"heute entladen {v}")
+        if v := val("sensor.s10e_pro_autarky_today", "%"):
+            battery_parts.append(f"Autarkie heute {v}")
+        if v := val("sensor.s10e_pro_installed_battery_capacity", " kWh"):
+            battery_parts.append(f"Kapazität {v}")
+        if battery_parts:
+            lines.append("Hausakku E3DC S10E Pro: " + ", ".join(battery_parts))
 
         # Wallbox
         wb_parts = []

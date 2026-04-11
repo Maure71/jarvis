@@ -100,12 +100,14 @@ body {
 }
 
 #chat-form {
+    width: 100%;
     max-width: 600px;
     margin: 20px auto 0 auto;
     padding: 0 20px calc(20px + env(safe-area-inset-bottom, 0px)) 20px;
     display: flex;
     gap: 8px;
     align-items: center;
+    box-sizing: border-box;
 }
 
 #chat-input {
@@ -186,5 +188,6 @@ body {
     }
     #chat-form {
         margin-top: auto;
+        align-self: stretch;
     }
 }
