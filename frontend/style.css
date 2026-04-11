@@ -166,14 +166,17 @@ body {
     cursor: not-allowed;
 }
 
-/* On narrow screens (iPhone), pin the input to the bottom so the
-   on-screen keyboard stays docked to it and the transcript scrolls
-   above.
-   Body is flex row + justify-content:center by default, which makes
-   child elements content-sized horizontally even with width:100%.
-   On mobile we flip body to column so the cross axis becomes
-   horizontal, then align-items:stretch genuinely fills the full
-   viewport width. */
+/* On narrow screens (iPhone, home-screen Web App), give each section
+   its own slot in a flex column so:
+     - The orb is vertically centered in the hero area (flex:1)
+     - The transcript has a bounded, scrollable area below
+     - The chat form pins to the bottom over the safe-area inset
+   Body is flex row + justify-content:center by default, which
+   content-sizes its children along the horizontal axis even with
+   width:100%. Flip body to column on mobile so the cross axis is
+   horizontal and align-items:stretch genuinely fills 100vw.
+   Use 100dvh (dynamic viewport height) so the layout adapts when
+   the iOS keyboard opens and the viewport shrinks. */
 @media (max-width: 700px) {
     body {
         flex-direction: column;
@@ -185,18 +188,30 @@ body {
         flex-direction: column;
         width: 100%;
         min-height: 100vh;
-        padding-top: 20px;
+        min-height: 100dvh;
+        padding-top: env(safe-area-inset-top, 0px);
     }
     #orb-container {
-        margin-bottom: 20px;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 0;
+        /* override base inline-block */
+    }
+    #status {
+        flex-shrink: 0;
     }
     #transcript {
-        flex: 1;
+        flex-shrink: 0;
         max-width: none;
-        max-height: none;
+        max-height: 30vh;
+        overflow-y: auto;
     }
     #chat-form {
-        margin-top: auto;
+        flex-shrink: 0;
+        margin-top: 12px;
         width: 100%;
         max-width: none;
     }

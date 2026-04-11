@@ -458,12 +458,33 @@ async def websocket_endpoint(ws: WebSocket):
         conversations.pop(session_id, None)
 
 
-app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "frontend")), name="static")
+# Static files — wrapped with a no-cache middleware so iOS Safari /
+# Tailscale serve don't keep an old build of main.js / style.css on
+# mobile after we ship a fix. The UI ships as a couple of tiny files,
+# so the revalidation cost is negligible compared to the debugging
+# cost of chasing phantom cache bugs on remote devices.
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+
+app.mount("/static", NoCacheStaticFiles(directory=os.path.join(os.path.dirname(__file__), "frontend")), name="static")
 
 
 @app.get("/")
 async def serve_index():
-    return FileResponse(os.path.join(os.path.dirname(__file__), "frontend", "index.html"))
+    return FileResponse(
+        os.path.join(os.path.dirname(__file__), "frontend", "index.html"),
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 if __name__ == "__main__":
