@@ -238,7 +238,7 @@ MAX_GAP = 1.2     # Seconds between claps
 | Quadrant snapping does nothing | Grant Accessibility permission to Terminal (and to the launchd helper once you install the plist) |
 | Apple Music plays nothing | Create the "Jarvis Wake-Up" playlist in your library, or make sure you have at least one AC/DC track locally |
 | Browser search fails | Run `playwright install chromium` inside the venv |
-| No audio in Chrome | Click anywhere on the page first (Chrome autoplay policy) |
+| No audio in Chrome | Click anywhere on the page first (Chrome autoplay policy). After clap-trigger auto-launch, `scripts/mic_workaround.applescript` simulates the click — requires Accessibility permission for osascript. |
 | Screenshot tool returns a black image | Grant Screen Recording permission to Python/Terminal |
 | Jarvis says "Sir planen" instead of "Sie planen" | Update the grammar rules in `server.py`'s system prompt |
 

@@ -79,17 +79,23 @@ function playNext() {
     audio.onended = () => { URL.revokeObjectURL(url); playNext(); };
     audio.onerror = () => { URL.revokeObjectURL(url); playNext(); };
     audio.play().catch(err => {
-        console.warn('[jarvis] Autoplay blocked, waiting for click...');
-        status.textContent = 'Klicke irgendwo damit Jarvis sprechen kann.';
+        console.warn('[jarvis] Autoplay blocked, waiting for user gesture...');
+        status.textContent = 'Klicke oder tippe irgendwo damit Jarvis sprechen kann.';
         setOrbState('idle');
-        // Wait for click then retry
-        document.addEventListener('click', function retry() {
+        // Wait for ANY user gesture (click or keydown) then retry.
+        // Listening on both means the synthetic Tab keystroke injected by
+        // scripts/mic_workaround.applescript after the clap-trigger auto-
+        // launch also triggers the replay, not just manual mouse clicks.
+        const retry = () => {
             document.removeEventListener('click', retry);
+            document.removeEventListener('keydown', retry);
             audio.play().then(() => {
                 setOrbState('speaking');
                 status.textContent = '';
             }).catch(() => playNext());
-        });
+        };
+        document.addEventListener('click', retry);
+        document.addEventListener('keydown', retry);
     });
 }
 
@@ -153,6 +159,22 @@ orb.addEventListener('click', () => {
         startListening();
     }
 });
+
+// WebKit/Chrome require a user gesture before webkitSpeechRecognition and
+// audio autoplay. Register a one-shot gesture listener that kicks off
+// listening on the first click OR keypress anywhere on the document.
+// Works both for manual interaction AND for the synthetic click that
+// scripts/mic_workaround.applescript injects after the clap-trigger
+// auto-launch sequence.
+const firstGesture = () => {
+    document.removeEventListener('click', firstGesture);
+    document.removeEventListener('keydown', firstGesture);
+    if (recognition && !isListening && !isPlaying) {
+        startListening();
+    }
+};
+document.addEventListener('click', firstGesture);
+document.addEventListener('keydown', firstGesture);
 
 function setOrbState(state) { orb.className = state; }
 

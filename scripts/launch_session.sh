@@ -59,4 +59,11 @@ fi
 sleep 3
 osascript "$SCRIPT_DIR/launch_session.applescript" || log "Quadrant snap returned non-zero (check Accessibility permissions)"
 
+# 6. WebKit mic workaround — simulate a click inside Chrome so
+#    webkitSpeechRecognition can start without waiting for a manual
+#    click on the orb. frontend/main.js auto-starts listening on the
+#    first document-level click or keydown.
+sleep 1
+osascript "$SCRIPT_DIR/mic_workaround.applescript" || log "mic_workaround returned non-zero (mic may need manual click)"
+
 log "Launch sequence done."
