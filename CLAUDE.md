@@ -24,6 +24,22 @@ Erst NACHDEM alle Voraussetzungen installiert sind, fahre mit dem Setup in `SETU
 
 ---
 
+## Nutzer-Standort (wichtig für Geolocation-Flow)
+
+Der Dienstherr wohnt in **Kisdorf** (Schleswig-Holstein). Wenn die
+iPhone-Geolocation-Handshake (`{type:"location", lat, lon}` → wttr.in
+Reverse-Geocoding in `server.py::get_weather_for_coords_sync`) für die
+Home-Koordinaten "Henstedt-Ulzburg" oder eine andere Nachbargemeinde
+zurückliefert, ist das **FALSCH** — der tatsächliche Wohnort ist Kisdorf.
+wttr.in snappt gelegentlich auf den nächstgrößeren Ort.
+
+Falls das in Zukunft stört: in `get_weather_for_coords_sync` nach dem
+Reverse-Geocode einen Override einbauen (Bounding-Box rund um die
+Koordinaten → "Kisdorf"), statt blind `nearest_area[0].areaName` zu
+übernehmen.
+
+---
+
 ## Workspace Structure
 
 ```
