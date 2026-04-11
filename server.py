@@ -18,8 +18,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-# Load .env first, then config.json. Env vars win.
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+# Load .env first, then config.json. The .env file always wins over
+# shell-env (override=True), because users sometimes have empty shadow
+# vars like ANTHROPIC_API_KEY="" in their .zshrc which would otherwise
+# silently block dotenv loading.
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 with open(CONFIG_PATH, "r") as f:
