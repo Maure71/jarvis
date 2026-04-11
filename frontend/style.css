@@ -168,15 +168,23 @@ body {
 
 /* On narrow screens (iPhone), pin the input to the bottom so the
    on-screen keyboard stays docked to it and the transcript scrolls
-   above. */
+   above.
+   Body is flex row + justify-content:center by default, which makes
+   child elements content-sized horizontally even with width:100%.
+   On mobile we flip body to column so the cross axis becomes
+   horizontal, then align-items:stretch genuinely fills the full
+   viewport width. */
 @media (max-width: 700px) {
     body {
+        flex-direction: column;
+        justify-content: flex-start;
         align-items: stretch;
     }
     #app {
         display: flex;
         flex-direction: column;
-        height: 100vh;
+        width: 100%;
+        min-height: 100vh;
         padding-top: 20px;
     }
     #orb-container {
@@ -184,10 +192,15 @@ body {
     }
     #transcript {
         flex: 1;
+        max-width: none;
         max-height: none;
     }
     #chat-form {
         margin-top: auto;
-        align-self: stretch;
+        width: 100%;
+        max-width: none;
+    }
+    #chat-input {
+        width: auto;
     }
 }
