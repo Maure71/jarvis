@@ -1,5 +1,29 @@
-.DS_Store
-*.log
+# Secrets
+.env
+config.json
+
+# Python
+.venv/
 __pycache__/
 *.pyc
-config.json
+*.pyo
+.pytest_cache/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+/tmp/jarvis-*.log
+
+# Build artifacts
+/build/
+/dist/
