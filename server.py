@@ -4,6 +4,16 @@ FastAPI backend: receives speech text, thinks with Claude Haiku,
 speaks with ElevenLabs, controls browser with Playwright.
 """
 
+# PEP 563: lazy annotation evaluation. Needed because the Mac Mini
+# still runs Python 3.9 (macOS system python) and `dict | None` /
+# `str | None` union syntax is a 3.10+ feature that would otherwise
+# crash the import at load time with
+#   TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'
+# With __future__ annotations all type hints are stored as strings and
+# only evaluated by tools that actually ask for them, so runtime is
+# version-agnostic.
+from __future__ import annotations
+
 import asyncio
 import base64
 import json
