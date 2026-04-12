@@ -272,14 +272,39 @@ class HomeAssistantClient:
         if battery_parts:
             lines.append("Hausakku E3DC S10E Pro: " + ", ".join(battery_parts))
 
-        # Wallbox
-        wb_parts = []
+        # Wallbox links (myenergi Zappi)
+        wb_left = []
         if v := val("sensor.myenergi_zappi_links_status"):
-            wb_parts.append(f"Status {v}")
+            wb_left.append(f"Status {v}")
+        if v := val("sensor.myenergi_zappi_links_plug_status"):
+            wb_left.append(f"Stecker {v}")
+        if v := val("sensor.myenergi_zappi_links_charge_rate", " W"):
+            wb_left.append(f"Ladeleistung {v}")
+        if v := val("sensor.myenergi_zappi_links_charge_added_session", " kWh"):
+            wb_left.append(f"Session {v}")
         if v := val("sensor.myenergi_zappi_links_energy_used_today", " kWh"):
-            wb_parts.append(f"heute geladen {v}")
-        if wb_parts:
-            lines.append("Wallbox links: " + ", ".join(wb_parts))
+            wb_left.append(f"heute geladen {v}")
+        if v := val("select.myenergi_zappi_links_charge_mode"):
+            wb_left.append(f"Modus {v}")
+        if wb_left:
+            lines.append("Wallbox links: " + ", ".join(wb_left))
+
+        # Wallbox rechts (myenergi Zappi), falls vorhanden
+        wb_right = []
+        if v := val("sensor.myenergi_zappi_rechts_status"):
+            wb_right.append(f"Status {v}")
+        if v := val("sensor.myenergi_zappi_rechts_plug_status"):
+            wb_right.append(f"Stecker {v}")
+        if v := val("sensor.myenergi_zappi_rechts_charge_rate", " W"):
+            wb_right.append(f"Ladeleistung {v}")
+        if v := val("sensor.myenergi_zappi_rechts_charge_added_session", " kWh"):
+            wb_right.append(f"Session {v}")
+        if v := val("sensor.myenergi_zappi_rechts_energy_used_today", " kWh"):
+            wb_right.append(f"heute geladen {v}")
+        if v := val("select.myenergi_zappi_rechts_charge_mode"):
+            wb_right.append(f"Modus {v}")
+        if wb_right:
+            lines.append("Wallbox rechts: " + ", ".join(wb_right))
 
         # Klima
         climate_parts = []
