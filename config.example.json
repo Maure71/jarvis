@@ -12,7 +12,17 @@
   "home_assistant_url": "https://YOUR_NABU_CASA_ID.ui.nabu.casa",
   "home_assistant_entities": [
     "sensor.example_temperature",
-    "person.you"
+    "person.you",
+    "sensor.myenergi_zappi_links_status",
+    "select.myenergi_zappi_links_charge_mode",
+    "sensor.myenergi_zappi_links_charge_added_session",
+    "sensor.myenergi_zappi_links_energy_used_today",
+    "sensor.myenergi_zappi_links_green_energy_today",
+    "sensor.myenergi_zappi_rechts_status",
+    "select.myenergi_zappi_rechts_charge_mode",
+    "sensor.myenergi_zappi_rechts_charge_added_session",
+    "sensor.myenergi_zappi_rechts_energy_used_today",
+    "sensor.myenergi_zappi_rechts_green_energy_today"
   ],
   "apps": []
 }
