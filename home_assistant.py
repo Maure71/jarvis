@@ -409,6 +409,63 @@ class HomeAssistantClient:
         #   if health_parts:
         #       lines.append("Gesundheit: " + ", ".join(health_parts))
 
+        # ── Plausibilitätsprüfung: logische Widersprüche erkennen ──
+        warnings: list[str] = []
+
+        # Hilfsfunktion: Person-Status auslesen
+        def person_state(eid: str) -> str | None:
+            s = by_id.get(eid)
+            if not s:
+                return None
+            st = s.get("state", "")
+            return st if st not in ("unknown", "unavailable", "") else None
+
+        mario_home = person_state("person.maure")
+        britta_home = person_state("person.britta")
+
+        # BMW Ladeleistung prüfen
+        bmw_power_raw = by_id.get(
+            "sensor.ix1_xdrive30_battery_ev_charging_power", {}
+        ).get("state")
+        try:
+            bmw_power = float(bmw_power_raw) if bmw_power_raw not in (None, "", "unknown", "unavailable") else 0.0
+        except (TypeError, ValueError):
+            bmw_power = 0.0
+
+        # Widerspruch 1: BMW lädt angeblich, aber Britta (BMW-Fahrerin) ist nicht zu Hause
+        if bmw_power > 0.5 and britta_home and britta_home != "home":
+            warnings.append(
+                f"WIDERSPRUCH: BMW zeigt {bmw_power:.0f} W Ladeleistung, "
+                f"aber person.britta meldet '{britta_home}'. "
+                "Der BMW-Ladewert ist vermutlich veraltet (Connected Drive "
+                "aktualisiert nicht, wenn das Auto unterwegs ist). "
+                "Vertraue der Anwesenheitserkennung."
+            )
+
+        # Widerspruch 2: Wallbox zeigt 'Charging' aber kein Auto zu Hause
+        wb_status_raw = by_id.get(
+            "sensor.myenergi_zappi_links_status", {}
+        ).get("state", "").lower()
+        all_away = (
+            (britta_home and britta_home != "home")
+            and (mario_home and mario_home != "home")
+        )
+        if "charg" in wb_status_raw and all_away:
+            warnings.append(
+                "WIDERSPRUCH: Wallbox meldet Ladestatus, aber beide Personen "
+                "sind nicht zu Hause. Wallbox-Status ist vermutlich veraltet."
+            )
+
+        # Widerspruch 3: Person als 'home' gemeldet, aber seit langer Zeit
+        # kein Update → können wir hier nicht prüfen (braucht last_changed),
+        # aber Jarvis bekommt den Hinweis im System-Prompt.
+
+        if warnings:
+            lines.append("")
+            lines.append("⚠️ PLAUSIBILITÄTS-HINWEISE (nicht vorlesen, nur intern nutzen):")
+            for w in warnings:
+                lines.append(f"  - {w}")
+
         return "\n".join(lines)
 
     async def search_entities(self, query: str) -> list[tuple[str, str, str]]:
