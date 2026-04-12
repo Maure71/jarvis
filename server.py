@@ -578,6 +578,53 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 
+# ── Push Notification device token storage ──────────────────────
+# The iOS app posts its APNs device token here on startup. We store
+# all registered tokens in a JSON file so they survive server restarts.
+# The actual push-sending code will use these tokens with the APNs
+# key configured in config.json.
+
+PUSH_TOKENS_FILE = os.path.join(os.path.dirname(__file__), "push_tokens.json")
+
+def _load_push_tokens() -> list[dict]:
+    try:
+        with open(PUSH_TOKENS_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def _save_push_tokens(tokens: list[dict]):
+    with open(PUSH_TOKENS_FILE, "w") as f:
+        json.dump(tokens, f, indent=2)
+
+
+from fastapi import Request
+
+@app.post("/api/push/register")
+async def register_push_token(request: Request):
+    """Register an iOS device token for APNs push notifications."""
+    body = await request.json()
+    token = body.get("device_token", "").strip()
+    device_name = body.get("device_name", "unknown")
+    platform = body.get("platform", "ios")
+
+    if not token:
+        return {"error": "missing device_token"}, 400
+
+    tokens = _load_push_tokens()
+    # Upsert: replace existing entry for same token
+    tokens = [t for t in tokens if t.get("device_token") != token]
+    tokens.append({
+        "device_token": token,
+        "device_name": device_name,
+        "platform": platform,
+        "registered_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    _save_push_tokens(tokens)
+    print(f"[jarvis] Push token registered: {device_name} ({token[:12]}...)", flush=True)
+    return {"status": "ok", "registered_devices": len(tokens)}
+
+
 app.mount("/static", NoCacheStaticFiles(directory=os.path.join(os.path.dirname(__file__), "frontend")), name="static")
 
 

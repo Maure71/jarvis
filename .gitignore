@@ -27,3 +27,15 @@ Icon?
 # Build artifacts
 /build/
 /dist/
+
+# Xcode (the .xcodeproj is created locally per developer — only the
+# Swift source files under ios/Jarvis/ are versioned)
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+ios/Jarvis/Jarvis.xcodeproj/
+ios/Jarvis/*.xcworkspace/
+
+# Push tokens (runtime data, not code)
+push_tokens.json
