@@ -232,6 +232,11 @@ ACTION_PATTERN = re.compile(r'\[ACTION:(\w+)\]\s*(.*?)$', re.DOTALL | re.MULTILI
 
 conversations: dict[str, list] = {}
 
+# Throttle full "Jarvis activate" greeting to max once every 2 hours.
+# Subsequent activations within the window get a short acknowledgment.
+GREETING_COOLDOWN_SECS = 7200  # 2 hours
+_last_full_greeting_ts: float = 0.0
+
 # Per-session overrides keyed by session_id. The mobile frontend sends
 # {"type": "location", "lat": ..., "lon": ...} once at startup; the server
 # looks up current weather + reverse-geocoded city for that position and
@@ -242,7 +247,7 @@ conversations: dict[str, list] = {}
 session_context: dict[str, dict] = {}
 
 
-def build_system_prompt(session_id: str | None = None):
+def build_system_prompt(session_id: str | None = None, short_greeting: bool = False):
     # Per-session override for mobile geolocation. If the client sent a
     # {type:location} message, we use its reverse-geocoded city + fresh
     # weather reading; otherwise we fall back to the home CITY / startup
@@ -281,6 +286,20 @@ def build_system_prompt(session_id: str | None = None):
             "=== ENDE SMART HOME ==="
         )
 
+    if short_greeting:
+        activate_instructions = (
+            f"- Begruesse {USER_NAME} KURZ mit einem einzigen Satz, z.B. 'Willkommen zurueck, {USER_ADDRESS}.' oder 'Zu Diensten, {USER_ADDRESS}.' oder eine aehnliche kurze, charmante Begruessungsformel.\n"
+            "- KEIN Wetter, KEINE Aufgaben, KEIN Smart-Home-Status. Nur die kurze Begruessungsformel.\n"
+            "- Halte es auf maximal 1 Satz."
+        )
+    else:
+        activate_instructions = (
+            "- Begruesse ihn passend zur Tageszeit (aktuelle Zeit: {time}).\n"
+            "- Gebe eine kurze Info ueber das Wetter — Temperatur und ob Sonne/klar/bewoelkt/Regen, und wie es sich anfuehlt. Keine Luftfeuchtigkeit.\n"
+            "- Fasse die Aufgaben kurz als Ueberblick in einem Satz zusammen, ohne dabei jede einzelne Aufgabe einfach vorzulesen. Gebe gerne einen humorvollen Kommentar am Ende an.\n"
+            "- Sei kreativ bei der Begruessung."
+        )
+
     return f"""Du bist Jarvis, der KI-Assistent von Tony Stark aus Iron Man. Dein Dienstherr ist {USER_NAME}. Du sprichst ausschliesslich Deutsch. {USER_NAME} moechte mit "{USER_ADDRESS}" angesprochen und gesiezt werden. Nutze "Sie" als Pronomen — FALSCH: "{USER_ADDRESS} planen", RICHTIG: "Sie planen, {USER_ADDRESS}". Dein Ton ist trocken, sarkastisch und britisch-hoeflich - wie ein Butler der alles gesehen hat und trotzdem loyal bleibt. Du machst subtile, trockene Bemerkungen, bist aber niemals respektlos. Wenn {USER_ADDRESS} eine offensichtliche Frage stellt, darfst du mit elegantem Sarkasmus antworten. Du bist hochintelligent, effizient und immer einen Schritt voraus. Halte deine Antworten kurz - maximal 3 Saetze. Du kommentierst fragwuerdige Entscheidungen hoeflich aber spitz.
 
 Du kennst {USER_NAME} gut — nutze das PROFIL unten, um Fragen konkret zu beantworten. Wenn {USER_NAME} nach etwas fragt, das im Profil steht (Familie, Firmen, Haus, Fahrzeuge, Smart Home, Projekte), beziehe dich darauf, als waere es selbstverstaendlich — du bist schliesslich sein Butler. Erfinde NICHTS, was nicht im Profil steht.
@@ -302,10 +321,7 @@ Nutze diese Aktion bei Fragen nach Solar, PV, Batterie, Wallbox, Pool, Garten, B
 [ACTION:LIGHT] service entity_id [parameter=wert] - Philips Hue Lichter steuern. Services: turn_on, turn_off, toggle. Optionale Parameter: brightness (0-255), color_temp (153-500 Mired). Beispiele: "[ACTION:LIGHT] turn_on light.kuche", "[ACTION:LIGHT] turn_off light.wohnzimmer", "[ACTION:LIGHT] turn_on light.schlafzimmer brightness=128", "[ACTION:LIGHT] toggle light.garage". Raeume: Kueche (light.kuche), Wohnzimmer (light.wohnzimmer), Schlafzimmer (light.schlafzimmer), Flur oben/unten (light.flur_oben, light.flur_unten), Veranda (light.veranda), Garage (light.garage), Kinderzimmer (light.kinderzimmer), Arbeitszimmer (light.arbeitszimmer_maure), HWR (light.hwr), Nebeneingang (light.nebeneingang), Muellhaus (light.mullhaus), Sofa Go (light.sofa_links_go, light.sofa_rechts_go), Leselampe (light.leselampe), Fernsehschrank (light.fernsehschrank), Anrichte (light.anrichte_links, light.anrichte_rechts), Bett Schlafzimmer (light.bett_schlafzimmer). Nutze diese Aktion wenn {USER_NAME} Licht an/aus/dimmen will. Wenn unklar welches Licht gemeint ist, frage nach.
 
 WENN {USER_NAME} "Jarvis activate" sagt:
-- Begruesse ihn passend zur Tageszeit (aktuelle Zeit: {{time}}).
-- Gebe eine kurze Info ueber das Wetter — Temperatur und ob Sonne/klar/bewoelkt/Regen, und wie es sich anfuehlt. Keine Luftfeuchtigkeit.
-- Fasse die Aufgaben kurz als Ueberblick in einem Satz zusammen, ohne dabei jede einzelne Aufgabe einfach vorzulesen. Gebe gerne einen humorvollen Kommentar am Ende an.
-- Sei kreativ bei der Begruessung.
+{activate_instructions}
 
 AKTUELLES DATUM UND UHRZEIT (NICHT RATEN!):
 Heute ist {{date_long}}. Die aktuelle Uhrzeit ist {{time}} Uhr.
@@ -315,7 +331,7 @@ Wenn {USER_ADDRESS} nach Wochentag, Datum, Monat, Jahr oder Uhrzeit fragt, nutze
 ==={profile_block}{home_block}"""
 
 
-def get_system_prompt(session_id: str | None = None):
+def get_system_prompt(session_id: str | None = None, short_greeting: bool = False):
     # German locale-independent date formatting — we build the string
     # manually so the output is always correct German regardless of
     # whether the macOS de_DE locale is installed and set.
@@ -328,7 +344,7 @@ def get_system_prompt(session_id: str | None = None):
     month = months_de[now.tm_mon - 1]
     date_long = f"{weekday}, der {now.tm_mday}. {month} {now.tm_year}"
     return (
-        build_system_prompt(session_id)
+        build_system_prompt(session_id, short_greeting=short_greeting)
         .replace("{time}", time.strftime("%H:%M"))
         .replace("{date_long}", date_long)
     )
@@ -463,13 +479,27 @@ async def execute_action(action: dict) -> str:
 
 async def process_message(session_id: str, user_text: str, ws: WebSocket):
     """Process message and send responses via WebSocket."""
+    global _last_full_greeting_ts
+
     if session_id not in conversations:
         conversations[session_id] = []
 
-    # Refresh weather + tasks on activate. Use the async variant because
-    # we're inside a running event loop — asyncio.run() would raise here.
+    # Throttle the full "Jarvis activate" greeting to max once every 2 hours.
+    # Within the cooldown window, skip the data refresh and tell the LLM to
+    # give a short acknowledgment instead of the full weather/tasks briefing.
+    short_greeting = False
     if "activate" in user_text.lower():
-        await refresh_data_async()
+        now = time.time()
+        if now - _last_full_greeting_ts >= GREETING_COOLDOWN_SECS:
+            # Full greeting: refresh all data and use normal prompt
+            await refresh_data_async()
+            _last_full_greeting_ts = now
+            print(f"[jarvis] Full greeting (cooldown reset)", flush=True)
+        else:
+            # Short greeting: skip refresh, use short prompt variant
+            short_greeting = True
+            remaining = int(GREETING_COOLDOWN_SECS - (now - _last_full_greeting_ts))
+            print(f"[jarvis] Short greeting (full greeting cooldown: {remaining}s remaining)", flush=True)
 
     conversations[session_id].append({"role": "user", "content": user_text})
     history = conversations[session_id][-16:]
@@ -478,7 +508,7 @@ async def process_message(session_id: str, user_text: str, ws: WebSocket):
     response = await ai.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=400,
-        system=get_system_prompt(session_id),
+        system=get_system_prompt(session_id, short_greeting=short_greeting),
         messages=history,
     )
     reply = response.content[0].text

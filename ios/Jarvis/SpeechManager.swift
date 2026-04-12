@@ -32,6 +32,11 @@ final class SpeechManager: ObservableObject {
     private var silenceTimer: Task<Void, Never>?
     private var lastPartialResult: String = ""
 
+    // Guard against triple-delivery: isFinal, silenceTimer, and error
+    // handler can all race to call finishWithTranscript. This flag
+    // ensures only the first one actually sends.
+    private var hasDelivered = false
+
     // MARK: - Authorization
 
     func requestAuthorization() async {
@@ -50,6 +55,7 @@ final class SpeechManager: ObservableObject {
 
     func startListening() {
         guard !isListening else { return }
+        hasDelivered = false
         guard recognizer?.isAvailable == true else {
             print("[jarvis] SFSpeechRecognizer not available")
             return
@@ -65,7 +71,7 @@ final class SpeechManager: ObservableObject {
             try audioSession.setCategory(
                 .playAndRecord,
                 mode: .measurement,
-                options: [.defaultToSpeaker, .allowBluetooth, .duckOthers]
+                options: [.defaultToSpeaker, .allowBluetoothHFP, .duckOthers]
             )
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
@@ -141,7 +147,7 @@ final class SpeechManager: ObservableObject {
             try audioSession.setCategory(
                 .playAndRecord,
                 mode: .voiceChat,
-                options: [.defaultToSpeaker, .allowBluetooth]
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
             )
         } catch {
             print("[jarvis] Audio session reconfigure error: \(error)")
@@ -151,6 +157,10 @@ final class SpeechManager: ObservableObject {
     // MARK: - Private
 
     private func finishWithTranscript(_ text: String) {
+        // Guard: isFinal, silenceTimer, and error handler can all race
+        // here. Only the first caller actually delivers the transcript.
+        guard !hasDelivered else { return }
+        hasDelivered = true
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         stopListening()
         if !trimmed.isEmpty {

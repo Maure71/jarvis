@@ -73,11 +73,11 @@ final class JarvisClient: NSObject, ObservableObject {
             let s = AVAudioSession.sharedInstance()
             // .playAndRecord so we can play TTS AND record mic in the
             // same session. .defaultToSpeaker so audio doesn't route to
-            // the earpiece. .allowBluetooth for AirPods.
+            // the earpiece. .allowBluetoothHFP for AirPods.
             try s.setCategory(
                 .playAndRecord,
                 mode: .voiceChat,
-                options: [.defaultToSpeaker, .allowBluetooth]
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
             )
             try s.setActive(true)
         } catch {
@@ -141,8 +141,10 @@ final class JarvisClient: NSObject, ObservableObject {
             guard let self else { return }
             switch result {
             case .success(let message):
-                Task { @MainActor in self.handleMessage(message) }
-                self.receiveLoop()   // keep listening
+                Task { @MainActor in
+                    self.handleMessage(message)
+                    self.receiveLoop()   // keep listening
+                }
             case .failure(let error):
                 print("[jarvis] WS receive error: \(error)")
                 Task { @MainActor in self.handleDisconnect() }
