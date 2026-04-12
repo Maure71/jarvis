@@ -1,8 +1,8 @@
 """
-Home Assistant read-only client for Jarvis.
+Home Assistant client for Jarvis (Level C — read + light control).
 
 Talks to a Home Assistant instance (typically via Nabu Casa Cloud) using
-a Long-Lived Access Token. Exposes three async helpers:
+a Long-Lived Access Token. Exposes async helpers:
 
 - get_dashboard_status()  -> compact dict/string snapshot of all curated
                              entities, used both at startup (system prompt)
@@ -11,6 +11,9 @@ a Long-Lived Access Token. Exposes three async helpers:
 - search_entities(query)  -> keyword filter over the curated entity list,
                              returns a list of (entity_id, friendly_name,
                              state) tuples.
+- call_service(domain, service, entity_id, **kwargs)
+                          -> call an HA service (e.g. light/turn_on).
+                             Only the 'light' domain is used by Jarvis.
 
 The token is read from the HOMEASSISTANT_TOKEN environment variable. The
 base URL and the curated entity list live in config.json. If either is
@@ -18,7 +21,7 @@ missing, the helpers degrade gracefully: get_dashboard_status() returns
 "" so the system prompt simply omits the block, and get_entity() returns
 an {"error": ...} dict.
 
-LEVEL B (read-only): no services are called, no state is ever changed.
+LEVEL C: read access to curated entities + write access to light.* only.
 """
 
 from __future__ import annotations
@@ -76,6 +79,81 @@ class HomeAssistantClient:
         resp = await _client().get(url, headers=self._headers)
         resp.raise_for_status()
         return resp.json()
+
+    async def _post(self, path: str, payload: dict) -> Any:
+        url = f"{self.base_url}{path}"
+        resp = await _client().post(url, headers=self._headers, json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def call_service(
+        self, domain: str, service: str, entity_id: str, **kwargs
+    ) -> dict | list:
+        """Call a Home Assistant service.
+
+        Example: call_service("light", "turn_on", "light.kuche", brightness=200)
+        Returns the HA response (list of changed states) or {"error": ...}.
+        """
+        if not self.configured:
+            return {"error": "Home Assistant nicht konfiguriert"}
+        try:
+            payload: dict[str, Any] = {"entity_id": entity_id}
+            payload.update(kwargs)
+            return await self._post(f"/api/services/{domain}/{service}", payload)
+        except httpx.HTTPStatusError as e:
+            return {"error": f"HTTP {e.response.status_code}"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def is_anyone_home(self, person_ids: list[str]) -> bool:
+        """Return True if at least one person entity has state 'home'."""
+        if not self.configured:
+            return True  # Fail safe: assume someone is home
+        results = await asyncio.gather(
+            *(self.get_entity(pid) for pid in person_ids),
+            return_exceptions=True,
+        )
+        for r in results:
+            if isinstance(r, dict) and r.get("state") == "home":
+                return True
+        return False
+
+    async def get_open_windows(
+        self, sensor_ids: list[str]
+    ) -> list[tuple[str, str]]:
+        """Return list of (entity_id, friendly_name) for sensors that are 'on' (= open)."""
+        if not self.configured:
+            return []
+        results = await asyncio.gather(
+            *(self.get_entity(sid) for sid in sensor_ids),
+            return_exceptions=True,
+        )
+        open_sensors: list[tuple[str, str]] = []
+        for r in results:
+            if isinstance(r, dict) and r.get("state") == "on":
+                eid = r.get("entity_id", "")
+                fn = r.get("attributes", {}).get("friendly_name", eid)
+                open_sensors.append((eid, fn))
+        return open_sensors
+
+    async def send_notification(
+        self, service_target: str, message: str, title: str = "Jarvis"
+    ) -> dict | list:
+        """Send a push notification via HA notify service.
+
+        Example: send_notification("mobile_app_iphone_maure", "Fenster offen!")
+        """
+        if not self.configured:
+            return {"error": "Home Assistant nicht konfiguriert"}
+        try:
+            return await self._post(
+                f"/api/services/notify/{service_target}",
+                {"message": message, "title": title},
+            )
+        except httpx.HTTPStatusError as e:
+            return {"error": f"HTTP {e.response.status_code}"}
+        except Exception as e:
+            return {"error": str(e)}
 
     async def get_entity(self, entity_id: str) -> dict:
         """Return raw HA state dict for a single entity, or {'error': ...}."""
@@ -271,6 +349,32 @@ class HomeAssistantClient:
         # Garten
         if v := val("sensor.pustans_garten_tagliche_aktive_bewasserungszeit", " min"):
             lines.append(f"Garten: Bewässerung heute {v}")
+
+        # Lichter (Philips Hue) — nur eingeschaltete anzeigen
+        lights_on = []
+        for s in states:
+            eid = s.get("entity_id", "")
+            if eid.startswith("light.") and s.get("state") == "on":
+                fn = s.get("attributes", {}).get("friendly_name", eid)
+                br = s.get("attributes", {}).get("brightness")
+                if br is not None:
+                    pct = round(br / 255 * 100)
+                    lights_on.append(f"{fn} ({pct}%)")
+                else:
+                    lights_on.append(fn)
+        if lights_on:
+            lines.append("Lichter an: " + ", ".join(lights_on))
+
+        # Fenster / Tueren — nur offene anzeigen
+        open_names = []
+        for s in states:
+            eid = s.get("entity_id", "")
+            dc = s.get("attributes", {}).get("device_class", "")
+            if dc in ("window", "door", "opening") and s.get("state") == "on":
+                fn = s.get("attributes", {}).get("friendly_name", eid)
+                open_names.append(fn)
+        if open_names:
+            lines.append("Fenster/Tueren offen: " + ", ".join(open_names))
 
         # Gesundheit (Apple Watch via HA Companion App HealthKit-Bridge)
         #

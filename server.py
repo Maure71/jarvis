@@ -64,6 +64,11 @@ import home_assistant
 
 ha_client = home_assistant.build_client_from_config(config)
 
+# Window monitor config
+WINDOW_MONITOR_SENSORS = config.get("window_monitor_sensors", [])
+WINDOW_MONITOR_PERSONS = config.get("window_monitor_persons", [])
+WINDOW_MONITOR_NOTIFY = config.get("window_monitor_notify", "")
+
 
 def get_weather_sync():
     """Fetch raw weather data at startup (for the fixed home CITY)."""
@@ -294,6 +299,7 @@ AKTIONEN - Schreibe die passende Aktion ans ENDE deiner Antwort. Der Text VOR de
 [ACTION:HOME] - Kompletten Smart Home Dashboard-Status aus Home Assistant abrufen (Solar, PV, Wallbox, Pool, Fahrzeuge, Alarm, Anwesenheit, Klima, Garten). Schreibe die Aktion EXAKT so: "[ACTION:HOME]" — KEINE weiteren Zeichen dahinter, KEINE Platzhalter wie <blank> oder <empty>, KEINE neue Zeile mit Inhalt, einfach nur die Aktion.
 [ACTION:HOME] suchbegriff - Nur passende Sensoren abrufen. Beispiele: "[ACTION:HOME] pool", "[ACTION:HOME] volvo", "[ACTION:HOME] solar". Nutze die Variante mit Suchbegriff, wenn {USER_NAME} nach einem bestimmten Bereich fragt.
 Nutze diese Aktion bei Fragen nach Solar, PV, Batterie, Wallbox, Pool, Garten, Bewässerung, Auto/Fahrzeug-Akku, Alarm, ob jemand zu Hause ist, CO2, Außentemperatur oder Smart Home allgemein. Der aktuelle Stand steht unten auch schon im Block SMART HOME STATUS — bei einfachen Fragen kannst du direkt daraus antworten, bei detaillierten oder Live-Fragen nutze die Aktion fuer frische Daten.
+[ACTION:LIGHT] service entity_id [parameter=wert] - Philips Hue Lichter steuern. Services: turn_on, turn_off, toggle. Optionale Parameter: brightness (0-255), color_temp (153-500 Mired). Beispiele: "[ACTION:LIGHT] turn_on light.kuche", "[ACTION:LIGHT] turn_off light.wohnzimmer", "[ACTION:LIGHT] turn_on light.schlafzimmer brightness=128", "[ACTION:LIGHT] toggle light.garage". Raeume: Kueche (light.kuche), Wohnzimmer (light.wohnzimmer), Schlafzimmer (light.schlafzimmer), Flur oben/unten (light.flur_oben, light.flur_unten), Veranda (light.veranda), Garage (light.garage), Kinderzimmer (light.kinderzimmer), Arbeitszimmer (light.arbeitszimmer_maure), HWR (light.hwr), Nebeneingang (light.nebeneingang), Muellhaus (light.mullhaus), Sofa Go (light.sofa_links_go, light.sofa_rechts_go), Leselampe (light.leselampe), Fernsehschrank (light.fernsehschrank), Anrichte (light.anrichte_links, light.anrichte_rechts), Bett Schlafzimmer (light.bett_schlafzimmer). Nutze diese Aktion wenn {USER_NAME} Licht an/aus/dimmen will. Wenn unklar welches Licht gemeint ist, frage nach.
 
 WENN {USER_NAME} "Jarvis activate" sagt:
 - Begruesse ihn passend zur Tageszeit (aktuelle Zeit: {{time}}).
@@ -425,6 +431,32 @@ async def execute_action(action: dict) -> str:
             )
         dashboard = await ha_client.get_dashboard_status()
         return dashboard or "Home Assistant nicht erreichbar."
+
+    elif t == "LIGHT":
+        # Format: "service entity_id [key=val ...]"
+        parts = p.split()
+        if len(parts) < 2:
+            return "Fehler: Bitte Service und Entity angeben (z.B. turn_on light.kuche)."
+        service = parts[0]
+        entity_id = parts[1]
+        if service not in ("turn_on", "turn_off", "toggle"):
+            return f"Fehler: Unbekannter Service '{service}'. Erlaubt: turn_on, turn_off, toggle."
+        if not entity_id.startswith("light."):
+            return f"Fehler: Nur Lichter steuerbar, '{entity_id}' ist kein light.*-Entity."
+        kwargs = {}
+        for part in parts[2:]:
+            if "=" in part:
+                k, v = part.split("=", 1)
+                try:
+                    kwargs[k] = int(v)
+                except ValueError:
+                    kwargs[k] = v
+        result = await ha_client.call_service("light", service, entity_id, **kwargs)
+        if isinstance(result, dict) and "error" in result:
+            return f"Fehler beim Steuern: {result['error']}"
+        friendly = entity_id.replace("light.", "").replace("_", " ").title()
+        action_de = {"turn_on": "eingeschaltet", "turn_off": "ausgeschaltet", "toggle": "umgeschaltet"}
+        return f"{friendly} wurde {action_de.get(service, service)}."
 
     return ""
 
@@ -638,6 +670,79 @@ async def serve_index():
             "Expires": "0",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Window Monitor — background task that checks for open windows/doors when
+# nobody is home and sends an iPhone push notification via HA.
+# ---------------------------------------------------------------------------
+
+_window_monitor_last_notified: float = 0.0
+_window_monitor_was_home: bool = True
+WINDOW_MONITOR_INTERVAL = 60       # seconds between checks
+WINDOW_MONITOR_COOLDOWN = 900      # 15 minutes between notifications
+
+
+async def window_monitor():
+    """Background coroutine: poll HA for presence + window sensors."""
+    global _window_monitor_last_notified, _window_monitor_was_home
+
+    if not (WINDOW_MONITOR_SENSORS and WINDOW_MONITOR_PERSONS and WINDOW_MONITOR_NOTIFY):
+        print("[jarvis] Window monitor: disabled (config incomplete)", flush=True)
+        return
+
+    print(
+        f"[jarvis] Window monitor: active, {len(WINDOW_MONITOR_SENSORS)} sensors, "
+        f"checking every {WINDOW_MONITOR_INTERVAL}s",
+        flush=True,
+    )
+    await asyncio.sleep(10)  # Let the server finish startup
+
+    while True:
+        try:
+            anyone_home = await ha_client.is_anyone_home(WINDOW_MONITOR_PERSONS)
+
+            if anyone_home:
+                _window_monitor_was_home = True
+                await asyncio.sleep(WINDOW_MONITOR_INTERVAL)
+                continue
+
+            # Nobody home — check if this is the transition moment or
+            # if we already notified recently.
+            now = time.time()
+            if now - _window_monitor_last_notified < WINDOW_MONITOR_COOLDOWN:
+                await asyncio.sleep(WINDOW_MONITOR_INTERVAL)
+                continue
+
+            open_windows = await ha_client.get_open_windows(WINDOW_MONITOR_SENSORS)
+
+            if open_windows and _window_monitor_was_home:
+                # Transition: was home → now nobody home, windows open
+                names = [fn for _, fn in open_windows]
+                msg = (
+                    f"Niemand zu Hause, aber noch offen: {', '.join(names)}. "
+                    f"Bitte prüfen, {USER_ADDRESS}."
+                )
+                result = await ha_client.send_notification(
+                    WINDOW_MONITOR_NOTIFY, msg
+                )
+                if isinstance(result, dict) and "error" in result:
+                    print(f"[jarvis] Window monitor notify error: {result}", flush=True)
+                else:
+                    print(f"[jarvis] Window monitor: notified — {', '.join(names)}", flush=True)
+                    _window_monitor_last_notified = now
+
+            _window_monitor_was_home = False
+
+        except Exception as e:
+            print(f"[jarvis] Window monitor error: {e}", flush=True)
+
+        await asyncio.sleep(WINDOW_MONITOR_INTERVAL)
+
+
+@app.on_event("startup")
+async def start_window_monitor():
+    asyncio.create_task(window_monitor())
 
 
 if __name__ == "__main__":
