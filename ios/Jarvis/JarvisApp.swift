@@ -38,10 +38,21 @@ struct JarvisApp: App {
                     switch newPhase {
                     case .active:
                         client.reconnectIfNeeded()
+                        // Keep screen awake while connected
+                        UIApplication.shared.isIdleTimerDisabled = true
                     case .background:
-                        break
+                        // Allow screen to sleep when backgrounded
+                        UIApplication.shared.isIdleTimerDisabled = false
                     default:
                         break
+                    }
+                }
+                // Also disable idle timer when connection drops
+                .onChange(of: client.connectionState) { _, state in
+                    if state == .disconnected {
+                        UIApplication.shared.isIdleTimerDisabled = false
+                    } else if state == .connected {
+                        UIApplication.shared.isIdleTimerDisabled = true
                     }
                 }
         }

@@ -147,7 +147,8 @@ target.build_configurations.each do |config|
   # s["CODE_SIGN_ENTITLEMENTS"]          = "Jarvis/Jarvis.entitlements"
   s["SWIFT_VERSION"]                   = "5.0"
   s["IPHONEOS_DEPLOYMENT_TARGET"]      = "17.0"
-  s["TARGETED_DEVICE_FAMILY"]          = "1"  # iPhone only
+  s["TARGETED_DEVICE_FAMILY"]          = "1,2"  # iPhone + iPad
+  s["SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD"] = "YES"
   s["ASSETCATALOG_COMPILER_APPICON_NAME"] = "AppIcon"
   s["GENERATE_INFOPLIST_FILE"]         = "NO"
   s["CODE_SIGN_STYLE"]                 = "Automatic"
