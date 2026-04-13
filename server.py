@@ -494,9 +494,10 @@ async def process_message(session_id: str, user_text: str, ws: WebSocket):
     if "activate" in user_text.lower():
         now = time.time()
         if now - _last_full_greeting_ts >= GREETING_COOLDOWN_SECS:
-            # Full greeting: refresh all data and use normal prompt
-            await refresh_data_async()
+            # Full greeting: set timestamp FIRST (before await) to prevent race condition
+            # where two concurrent activations both pass the cooldown check.
             _last_full_greeting_ts = now
+            await refresh_data_async()
             print(f"[jarvis] Full greeting (cooldown reset)", flush=True)
         else:
             # Short greeting: skip refresh, use short prompt variant
