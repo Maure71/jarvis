@@ -58,7 +58,7 @@ def _client() -> httpx.AsyncClient:
     return client
 
 
-    # Wallbox entities that are always fetched, regardless of config.json.
+    # Entities that are always fetched, regardless of config.json.
     # This avoids requiring a manual config update when new sensors are added.
 WALLBOX_ENTITIES = [
     "sensor.myenergi_zappi_links_status",
@@ -73,6 +73,20 @@ WALLBOX_ENTITIES = [
     "sensor.myenergi_zappi_rechts_green_energy_today",
 ]
 
+NETATMO_ENTITIES = [
+    "sensor.temperatur_draussen_temperatur",
+    "sensor.temperatur_draussen_luftfeuchtigkeit",
+    "sensor.thermometer_innen_temperatur",
+    "sensor.thermometer_innen_luftfeuchtigkeit",
+    "sensor.innen_schlafzimmer_temperatur",
+    "sensor.innen_schlafzimmer_luftfeuchtigkeit",
+    "sensor.innen_kinderzimmer_temperatur",
+    "sensor.innen_kinderzimmer_luftfeuchtigkeit",
+    "sensor.windmesser_windgeschwindigkeit",
+]
+
+AUTO_ENTITIES = WALLBOX_ENTITIES + NETATMO_ENTITIES
+
 
 class HomeAssistantClient:
     """Thin async client for the HA REST API."""
@@ -80,9 +94,9 @@ class HomeAssistantClient:
     def __init__(self, base_url: str, token: str, entities: list[str]):
         self.base_url = base_url.rstrip("/")
         self.token = token
-        # Merge config entities with always-on Wallbox entities (deduplicated).
+        # Merge config entities with always-on entities (deduplicated).
         merged = list(entities)
-        for eid in WALLBOX_ENTITIES:
+        for eid in AUTO_ENTITIES:
             if eid not in merged:
                 merged.append(eid)
         self.entities = merged
@@ -323,23 +337,41 @@ class HomeAssistantClient:
         if wb_right:
             lines.append("Wallbox rechts: " + ", ".join(wb_right))
 
-        # Klima
+        # Klima — Außen
         climate_parts = []
-        if v := val("sensor.arbeitszimmer_oben_aussen_temperatur", "°C"):
-            climate_parts.append(f"Außen {v}")
-        if v := val("sensor.arbeitszimmer_oben_aussen_luftfeuchtigkeit", "%"):
-            climate_parts.append(f"Luftfeuchte {v}")
-        if v := val("sensor.arbeitszimmer_oben_innen_wohnzimmer_kohlendioxid", " ppm"):
-            climate_parts.append(f"CO₂ Wohnzimmer {v}")
-        if v := val("sensor.homematic_ip_wettersensor_pro_windspeed", " km/h"):
-            climate_parts.append(f"Wind {v}")
+        # Netatmo Außenmodul bevorzugen, Fallback auf Arbeitszimmer-Sensor
+        outdoor_temp = val("sensor.temperatur_draussen_temperatur", "°C") or val("sensor.arbeitszimmer_oben_aussen_temperatur", "°C")
+        if outdoor_temp:
+            climate_parts.append(f"Außen {outdoor_temp}")
+        outdoor_hum = val("sensor.temperatur_draussen_luftfeuchtigkeit", "%") or val("sensor.arbeitszimmer_oben_aussen_luftfeuchtigkeit", "%")
+        if outdoor_hum:
+            climate_parts.append(f"Luftfeuchte {outdoor_hum}")
+        # Netatmo Windmesser bevorzugen, Fallback auf HomematicIP
+        wind = val("sensor.windmesser_windgeschwindigkeit", " km/h") or val("sensor.homematic_ip_wettersensor_pro_windspeed", " km/h")
+        if wind:
+            climate_parts.append(f"Wind {wind}")
         raining = by_id.get("binary_sensor.homematic_ip_wettersensor_pro_raining", {}).get("state")
         if raining == "on":
             climate_parts.append("regnet gerade")
         if v := val("sensor.homematic_ip_wettersensor_pro_today_rain", " mm"):
             climate_parts.append(f"Regen heute {v}")
         if climate_parts:
-            lines.append("Klima: " + ", ".join(climate_parts))
+            lines.append("Klima außen: " + ", ".join(climate_parts))
+
+        # Klima — Innenräume (Netatmo)
+        indoor_parts = []
+        if v := val("sensor.thermometer_innen_temperatur", "°C"):
+            indoor_parts.append(f"Wohnzimmer {v}")
+        if v := val("sensor.thermometer_innen_luftfeuchtigkeit", "%"):
+            indoor_parts.append(f"({v} Feuchte)")
+        if v := val("sensor.arbeitszimmer_oben_innen_wohnzimmer_kohlendioxid", " ppm"):
+            indoor_parts.append(f"CO₂ {v}")
+        if v := val("sensor.innen_schlafzimmer_temperatur", "°C"):
+            indoor_parts.append(f"Schlafzimmer {v}")
+        if v := val("sensor.innen_kinderzimmer_temperatur", "°C"):
+            indoor_parts.append(f"Kinderzimmer {v}")
+        if indoor_parts:
+            lines.append("Klima innen: " + ", ".join(indoor_parts))
 
         # Pool
         pool_parts = []
