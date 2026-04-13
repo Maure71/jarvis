@@ -75,22 +75,22 @@ WALLBOX_ENTITIES = [
 
 NETATMO_ENTITIES = [
     # Wohnzimmer (Innen)
-    sensor.arbeitszimmer_oben_innen_wohnzimmer_temperatur,
-    sensor.arbeitszimmer_oben_innen_wohnzimmer_luftfeuchtigkeit,
-    sensor.arbeitszimmer_oben_innen_wohnzimmer_kohlendioxid,
+    "sensor.arbeitszimmer_oben_innen_wohnzimmer_temperatur",
+    "sensor.arbeitszimmer_oben_innen_wohnzimmer_luftfeuchtigkeit",
+    "sensor.arbeitszimmer_oben_innen_wohnzimmer_kohlendioxid",
     # Kinderzimmer
-    sensor.arbeitszimmer_oben_kinderzimmer_temperatur,
-    sensor.arbeitszimmer_oben_kinderzimmer_luftfeuchtigkeit,
-    sensor.arbeitszimmer_oben_kinderzimmer_kohlendioxid,
+    "sensor.arbeitszimmer_oben_kinderzimmer_temperatur",
+    "sensor.arbeitszimmer_oben_kinderzimmer_luftfeuchtigkeit",
+    "sensor.arbeitszimmer_oben_kinderzimmer_kohlendioxid",
     # Schlafzimmer
-    sensor.arbeitszimmer_oben_schlafzimmer_oben_temperatur,
-    sensor.arbeitszimmer_oben_schlafzimmer_oben_luftfeuchtigkeit,
-    sensor.arbeitszimmer_oben_schlafzimmer_oben_kohlendioxid,
+    "sensor.arbeitszimmer_oben_schlafzimmer_oben_temperatur",
+    "sensor.arbeitszimmer_oben_schlafzimmer_oben_luftfeuchtigkeit",
+    "sensor.arbeitszimmer_oben_schlafzimmer_oben_kohlendioxid",
     # Aussen
-    sensor.arbeitszimmer_oben_windmesser_windgeschwindigkeit,
-    sensor.arbeitszimmer_oben_windmesser_windrichtung,
-    sensor.arbeitszimmer_oben_regenmesser_niederschlagsmenge,
-    sensor.arbeitszimmer_oben_regenmesser_niederschlagsmenge_heute,
+    "sensor.arbeitszimmer_oben_windmesser_windgeschwindigkeit",
+    "sensor.arbeitszimmer_oben_windmesser_windrichtung",
+    "sensor.arbeitszimmer_oben_regenmesser_niederschlagsmenge",
+    "sensor.arbeitszimmer_oben_regenmesser_niederschlagsmenge_heute",
 ]
 
 AUTO_ENTITIES = WALLBOX_ENTITIES + NETATMO_ENTITIES
