@@ -542,21 +542,46 @@ class HomeAssistantClient:
 
         return "\n".join(lines)
 
+    # Map common German search terms to entity keywords so that
+    # queries like "klima" or "raumtemperatur" find the right sensors.
+    _SEARCH_ALIASES: dict[str, list[str]] = {
+        "klima": ["temperatur", "luftfeuchtigkeit", "kohlendioxid", "wind", "rain", "regen"],
+        "raumklima": ["temperatur", "luftfeuchtigkeit", "kohlendioxid"],
+        "raumtemperatur": ["temperatur"],
+        "netatmo": ["temperatur", "luftfeuchtigkeit", "kohlendioxid", "windmesser", "regenmesser"],
+        "luft": ["luftfeuchtigkeit", "kohlendioxid"],
+        "luftqualitaet": ["kohlendioxid", "luftfeuchtigkeit"],
+        "innen": ["innen", "thermometer_innen"],
+        "aussen": ["draussen", "aussen", "wind", "regen"],
+        "wetter": ["draussen", "aussen", "wind", "regen", "temperatur"],
+    }
+
     async def search_entities(self, query: str) -> list[tuple[str, str, str]]:
         """Keyword search across curated entities.
 
         Returns list of (entity_id, friendly_name, state) for anything
         whose entity_id or friendly_name contains the query (case-insensitive).
+        Supports German alias expansion (e.g. "klima" finds temperature sensors).
         """
         q = query.lower().strip()
         if not q:
             return []
         states = await self.get_curated_states()
+
+        # Build search terms: original query + any alias expansions
+        terms = [q]
+        for alias, expansions in self._SEARCH_ALIASES.items():
+            if alias in q:
+                terms.extend(expansions)
+
         hits: list[tuple[str, str, str]] = []
+        seen: set[str] = set()
         for s in states:
             eid = s.get("entity_id", "")
             fn = s.get("attributes", {}).get("friendly_name", "") or ""
-            if q in eid.lower() or q in fn.lower():
+            haystack = f"{eid.lower()} {fn.lower()}"
+            if any(t in haystack for t in terms) and eid not in seen:
+                seen.add(eid)
                 hits.append((eid, fn, s.get("state", "")))
         return hits
 
