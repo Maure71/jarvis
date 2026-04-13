@@ -58,13 +58,34 @@ def _client() -> httpx.AsyncClient:
     return client
 
 
+    # Wallbox entities that are always fetched, regardless of config.json.
+    # This avoids requiring a manual config update when new sensors are added.
+WALLBOX_ENTITIES = [
+    "sensor.myenergi_zappi_links_status",
+    "select.myenergi_zappi_links_charge_mode",
+    "sensor.myenergi_zappi_links_charge_added_session",
+    "sensor.myenergi_zappi_links_energy_used_today",
+    "sensor.myenergi_zappi_links_green_energy_today",
+    "sensor.myenergi_zappi_rechts_status",
+    "select.myenergi_zappi_rechts_charge_mode",
+    "sensor.myenergi_zappi_rechts_charge_added_session",
+    "sensor.myenergi_zappi_rechts_energy_used_today",
+    "sensor.myenergi_zappi_rechts_green_energy_today",
+]
+
+
 class HomeAssistantClient:
     """Thin async client for the HA REST API."""
 
     def __init__(self, base_url: str, token: str, entities: list[str]):
         self.base_url = base_url.rstrip("/")
         self.token = token
-        self.entities = entities
+        # Merge config entities with always-on Wallbox entities (deduplicated).
+        merged = list(entities)
+        for eid in WALLBOX_ENTITIES:
+            if eid not in merged:
+                merged.append(eid)
+        self.entities = merged
         self._headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
