@@ -237,6 +237,21 @@ final class JarvisClient: NSObject, ObservableObject {
         print("[jarvis] Location sent: \(location.coordinate.latitude), \(location.coordinate.longitude)")
     }
 
+    private func resetAudioSessionForRecording() {
+        do {
+            let s = AVAudioSession.sharedInstance()
+            try s.setActive(false, options: .notifyOthersOnDeactivation)
+            try s.setCategory(
+                .playAndRecord,
+                mode: .voiceChat,
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
+            )
+            try s.setActive(true)
+        } catch {
+            print("[jarvis] Audio session reset failed: \(error)")
+        }
+    }
+
     // MARK: - Audio playback queue
 
     private func queueAudio(_ data: Data) {
@@ -249,6 +264,9 @@ final class JarvisClient: NSObject, ObservableObject {
             isPlaying = false
             orbState = .idle
             statusText = ""
+            // Reset audio session to recording mode so the mic gets
+            // a clean tap after playback ends.
+            resetAudioSessionForRecording()
             onDoneSpeaking?()
             return
         }

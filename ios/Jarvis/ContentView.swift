@@ -147,7 +147,8 @@ struct ContentView: View {
             client.orbState = .idle
             client.statusText = "Pausiert. Tippen zum Fortsetzen."
         } else if client.orbState == .idle || client.orbState == .listening {
-            guard !chatFocused else { return }
+            // Dismiss keyboard if open, then start voice
+            chatFocused = false
             speech.startListening()
             client.orbState = .listening
             client.statusText = ""
@@ -175,8 +176,9 @@ struct ContentView: View {
 
         // Wire up: when Jarvis finishes speaking, auto-restart listening
         client.onDoneSpeaking = {
-            guard !chatFocused else { return }
             guard speech.isAuthorized else { return }
+            // Dismiss keyboard if it was open (e.g. after typed message)
+            chatFocused = false
             // Small delay so audio session can switch back to recording
             Task {
                 try? await Task.sleep(for: .milliseconds(300))
