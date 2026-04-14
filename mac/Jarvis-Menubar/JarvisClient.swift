@@ -161,15 +161,15 @@ final class JarvisClient: NSObject, ObservableObject {
             }
         }
 
-        // Capture off the main thread — CGDisplayCreateImage is
-        // expensive enough to briefly freeze the UI on large displays.
+        // Capture off the main thread — ScreenCaptureKit is async
+        // and must be awaited.
         Task.detached { [weak self] in
             guard let self else { return }
-            let png = await MainActor.run { self.screenCapture.captureMainDisplayPNG() }
+            let png = await self.screenCapture.captureMainDisplayPNG()
             guard let png else {
                 await MainActor.run {
                     self.send(["type": "screenshot_error",
-                               "error": "Screenshot konnte nicht erstellt werden (CGDisplayCreateImage lieferte nil)"])
+                               "error": "Screenshot konnte nicht erstellt werden (Permission fehlt oder SCKit-Fehler)"])
                     self.statusText = ""
                 }
                 return
