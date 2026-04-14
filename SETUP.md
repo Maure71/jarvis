@@ -137,6 +137,56 @@ Zweimal klatschen → Spotify, VS Code, Obsidian, Chrome mit Jarvis starten auto
 | Klatschen wird nicht erkannt | Threshold in `clap-trigger.py` anpassen |
 | Browser-Suche geht nicht | `playwright install chromium` ausfuehren |
 | Kein Audio im Browser | Einmal auf die Seite klicken (Chrome Autoplay-Policy) |
+| Jarvis unterwegs nicht erreichbar | Tailscale Funnel pruefen: `scripts/tailscale_funnel.sh status` |
+| Funnel startet nicht | Tailscale eingeloggt? `tailscale status` pruefen. Funnel aktiviert? `tailscale funnel 8340` |
+
+---
+
+## Mobiler Zugriff (5G / unterwegs)
+
+Jarvis kann ueber **Tailscale Funnel** von ueberall erreichbar gemacht werden — kein Port-Forwarding, keine eigene Domain noetig.
+
+### Einmalige Einrichtung auf dem Mac Mini
+
+1. **Tailscale installieren** (falls noch nicht geschehen):
+   ```
+   brew install tailscale
+   ```
+   Dann einloggen: `tailscale up`
+
+2. **Funnel aktivieren** (Tailscale Admin Console):
+   - Oeffne https://login.tailscale.com/admin/machines
+   - Klicke auf den Mac Mini → "Edit route settings"
+   - Aktiviere "Funnel" unter den Node-Einstellungen
+   - (Alternativ in der CLI: `tailscale set --funnel`)
+
+3. **Funnel starten**:
+   ```
+   scripts/tailscale_funnel.sh start
+   ```
+   Das gibt dir eine URL wie `https://mac-mini.tail1234.ts.net/`
+
+4. **Auf dem iPhone**: URL in Safari oeffnen → Teilen-Button → "Zum Home-Bildschirm" → fertig. Jarvis wird als PWA installiert und funktioniert wie eine native App.
+
+### Automatischer Start
+
+Der Funnel wird automatisch mit `scripts/launch_session.sh` gestartet (Doppelklatschen). Er bleibt auch nach einem Neustart aktiv dank `--bg`.
+
+### Manuell starten/stoppen
+
+```bash
+scripts/tailscale_funnel.sh start    # Funnel aktivieren
+scripts/tailscale_funnel.sh stop     # Funnel deaktivieren
+scripts/tailscale_funnel.sh status   # Status anzeigen
+scripts/tailscale_funnel.sh url      # Oeffentliche URL ausgeben
+```
+
+### Sicherheit
+
+- Tailscale Funnel nutzt automatisch HTTPS mit gueltigem Let's Encrypt Zertifikat
+- WebSocket (WSS) wird transparent unterstuetzt
+- Jeder mit der URL kann auf Jarvis zugreifen — die URL ist aber lang und nicht erratbar
+- Optional: Tailscale ACLs fuer zusaetzliche Einschraenkungen konfigurieren
 
 ---
 

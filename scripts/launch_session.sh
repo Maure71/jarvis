@@ -66,4 +66,13 @@ osascript "$SCRIPT_DIR/launch_session.applescript" || log "Quadrant snap returne
 sleep 1
 osascript "$SCRIPT_DIR/mic_workaround.applescript" || log "mic_workaround returned non-zero (mic may need manual click)"
 
+# 7. Tailscale Funnel — expose Jarvis publicly so it works over 5G.
+#    --bg runs the funnel as a background daemon. If Tailscale is not
+#    installed or not logged in this just prints a warning and continues.
+if command -v tailscale &>/dev/null || [[ -x /opt/homebrew/bin/tailscale ]]; then
+  "$SCRIPT_DIR/tailscale_funnel.sh" start || log "Tailscale Funnel konnte nicht gestartet werden (weiter ohne)"
+else
+  log "Tailscale nicht installiert — Jarvis nur lokal erreichbar"
+fi
+
 log "Launch sequence done."

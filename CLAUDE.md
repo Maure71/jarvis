@@ -4,6 +4,24 @@ Dieses Workspace ist **Jarvis** — ein persoenlicher KI-Assistent mit Sprachste
 
 ---
 
+## Workflow: Cowork + Claude Code
+
+Mario entwickelt mit **Claude Code** (CLI) und nutzt **Cowork** (Desktop-App) fuer Planung, Recherche und UI-Aufgaben.
+
+**Wenn Cowork an Grenzen stoesst** (z.B. kein SSH, kein Terminal-Tippen, kein Xcode-Build), soll Cowork:
+1. Einen **kopierfertigen Claude-Code-Prompt** bereitstellen, der die Aufgabe praezise beschreibt
+2. Den Prompt so formulieren, dass Claude Code sofort loslegen kann — inkl. Dateipfade, Kontext und was bereits erledigt wurde
+3. Format: Prompt im Codeblock, damit Mario ihn direkt kopieren kann
+
+**Infrastruktur-Hinweise fuer Claude Code:**
+- Jarvis-Server laeuft auf dem **Mac Mini** (Tailscale IP: `100.93.26.13`, Hostname: `mac-mini-mario`)
+- Tailscale CLI auf dem Mac Mini: `/opt/homebrew/bin/tailscale` (Homebrew-Installation)
+- Tailscale Funnel ist aktiv: `https://mac-mini-mario.taile91bf3.ts.net/`
+- iOS App liegt unter `ios/` — Xcode-Projekt, SwiftUI, deployed aufs iPhone
+- SSH vom MacBook zum Mac Mini: `ssh 100.93.26.13`
+
+---
+
 ## Fuer Claude Code: Setup-Modus
 
 Wenn der Nutzer nach dem Setup fragt oder "Richte Jarvis ein" sagt, folge den Anweisungen in `SETUP.md`. Frage den Nutzer nach seinem Namen, seiner Taetigkeit, und wie er angesprochen werden moechte — diese Infos muessen in den Systemprompt in `server.py` eingetragen werden (ersetze die aktuellen Platzhalter "Julian", "KI-Berater und Automatisierungsexperte", "Sir").

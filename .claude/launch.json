@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "jarvis-local",
+      "runtimeExecutable": "true",
+      "runtimeArgs": [],
+      "port": 8340
+    }
+  ]
+}

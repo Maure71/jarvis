@@ -781,8 +781,28 @@ async def start_window_monitor():
 
 if __name__ == "__main__":
     import uvicorn
+    import subprocess
+
+    # Detect Tailscale Funnel URL for the startup banner.
+    funnel_url = None
+    try:
+        ts_bin = "/opt/homebrew/bin/tailscale" if os.path.exists("/opt/homebrew/bin/tailscale") else "tailscale"
+        result = subprocess.run(
+            [ts_bin, "status", "--json"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if result.returncode == 0:
+            ts_data = json.loads(result.stdout)
+            dns_name = ts_data.get("Self", {}).get("DNSName", "").rstrip(".")
+            if dns_name:
+                funnel_url = f"https://{dns_name}"
+    except Exception:
+        pass
+
     print("=" * 50, flush=True)
     print("  J.A.R.V.I.S. V2 Server", flush=True)
-    print(f"  http://localhost:8340", flush=True)
+    print(f"  Lokal:  http://localhost:8340", flush=True)
+    if funnel_url:
+        print(f"  Mobil:  {funnel_url}/", flush=True)
     print("=" * 50, flush=True)
     uvicorn.run(app, host="0.0.0.0", port=8340)

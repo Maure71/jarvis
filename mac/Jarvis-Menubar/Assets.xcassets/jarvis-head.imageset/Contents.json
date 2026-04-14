@@ -1,0 +1,8 @@
+{
+  "images": [
+    {"idiom": "universal", "scale": "1x", "filename": "jarvis-head.png"},
+    {"idiom": "universal", "scale": "2x", "filename": "jarvis-head@2x.png"},
+    {"idiom": "universal", "scale": "3x", "filename": "jarvis-head@3x.png"}
+  ],
+  "info": {"version": 1, "author": "xcode"}
+}
