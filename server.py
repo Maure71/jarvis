@@ -434,25 +434,40 @@ async def execute_action(action: dict,
         return f"Geoeffnet: {p}"
 
     elif t == "SCREEN":
-        # First try to get a screenshot from the connected client (macOS
-        # app / PWA on the user's device). If the client doesn't support
-        # it — or doesn't answer in time — fall back to the server-side
-        # screenshot of the Mac Mini's own display.
+        # Ask the connected client (macOS app, PWA) for a screenshot.
+        # The Mac Mini itself is usually headless, so a server-side
+        # capture wouldn't help — we only fall back to it for text
+        # clients (no screen capabilities at all) or if the client
+        # silently disappears.
         if session_id and ws is not None:
             loop = asyncio.get_running_loop()
             future: asyncio.Future = loop.create_future()
             pending_screenshots[session_id] = future
             try:
                 await ws.send_json({"type": "request_screenshot"})
-                png_bytes = await asyncio.wait_for(future, timeout=8)
+                png_bytes = await asyncio.wait_for(future, timeout=15)
+                print(f"[jarvis] Describing client screenshot ({len(png_bytes)} bytes)", flush=True)
                 return await screen_capture.describe_bytes(ai, png_bytes)
             except asyncio.TimeoutError:
-                print("[jarvis] Client didn't send screenshot in time — falling back to local capture", flush=True)
+                print("[jarvis] Client didn't send screenshot within 15s", flush=True)
+                return "Der Bildschirm-Screenshot hat zu lange gedauert, Sir. Ist die macOS-App offen und hat Screen-Recording-Rechte?"
+            except RuntimeError as e:
+                msg = str(e)
+                if "permission" in msg.lower() or "rechte" in msg.lower():
+                    return (
+                        "Ich darf Ihren Bildschirm nicht ansehen, Sir. "
+                        "Bitte aktivieren Sie Screen Recording fuer Jarvis in "
+                        "Systemeinstellungen → Datenschutz & Sicherheit → Bildschirmaufnahme "
+                        "und starten Sie die App neu."
+                    )
+                return f"Der Client konnte keinen Screenshot machen: {msg}"
             except Exception as e:
-                print(f"[jarvis] Client screenshot error: {e} — falling back to local capture", flush=True)
+                print(f"[jarvis] Client screenshot error: {e}", flush=True)
+                return f"Beim Screenshot ist etwas schiefgegangen: {e}"
             finally:
                 pending_screenshots.pop(session_id, None)
 
+        # No active WebSocket — try a local capture as a last resort.
         return await screen_capture.describe_screen(ai)
 
     elif t == "NEWS":
@@ -680,9 +695,24 @@ async def websocket_endpoint(ws: WebSocket):
                 if future is not None and not future.done():
                     try:
                         png_bytes = base64.b64decode(b64)
-                        future.set_result(png_bytes)
+                        if len(png_bytes) < 100:
+                            future.set_exception(
+                                ValueError(f"Screenshot payload too small ({len(png_bytes)} bytes)")
+                            )
+                        else:
+                            print(f"[jarvis] Got screenshot from client: {len(png_bytes)} bytes", flush=True)
+                            future.set_result(png_bytes)
                     except Exception as e:
                         future.set_exception(e)
+                continue
+
+            # Screenshot error from the client (e.g. permission missing).
+            if data.get("type") == "screenshot_error":
+                err = data.get("error", "unknown error")
+                print(f"[jarvis] Client screenshot_error: {err}", flush=True)
+                future = pending_screenshots.get(session_id)
+                if future is not None and not future.done():
+                    future.set_exception(RuntimeError(err))
                 continue
 
             if data.get("type") == "location":

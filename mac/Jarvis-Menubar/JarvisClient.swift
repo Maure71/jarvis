@@ -144,6 +144,23 @@ final class JarvisClient: NSObject, ObservableObject {
     }
 
     private func handleScreenshotRequest() {
+        print("[jarvis] Screenshot requested by server")
+        statusText = "Screenshot wird gemacht..."
+
+        // Trigger the permission prompt if it's not granted yet.
+        // CGRequestScreenCaptureAccess shows the system dialog once;
+        // after the user clicks "Open System Settings" and toggles
+        // Jarvis on, they must re-launch the app for it to stick.
+        if !screenCapture.isAuthorized {
+            screenCapture.requestAuthorization()
+            if !screenCapture.isAuthorized {
+                send(["type": "screenshot_error",
+                      "error": "Screen Recording permission fehlt. In Systemeinstellungen aktivieren und App neu starten."])
+                statusText = ""
+                return
+            }
+        }
+
         // Capture off the main thread — CGDisplayCreateImage is
         // expensive enough to briefly freeze the UI on large displays.
         Task.detached { [weak self] in
@@ -152,13 +169,16 @@ final class JarvisClient: NSObject, ObservableObject {
             guard let png else {
                 await MainActor.run {
                     self.send(["type": "screenshot_error",
-                               "error": "Screen Recording permission fehlt"])
+                               "error": "Screenshot konnte nicht erstellt werden (CGDisplayCreateImage lieferte nil)"])
+                    self.statusText = ""
                 }
                 return
             }
+            print("[jarvis] Screenshot captured: \(png.count) bytes")
             let b64 = png.base64EncodedString()
             await MainActor.run {
                 self.send(["type": "screenshot", "data": b64])
+                self.statusText = ""
             }
         }
     }
