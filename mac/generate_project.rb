@@ -39,10 +39,33 @@ assets_dir = File.join(SOURCE_DIR, "Assets.xcassets")
 unless File.exist?(assets_dir)
   FileUtils.mkdir_p(File.join(assets_dir, "AppIcon.appiconset"))
   FileUtils.mkdir_p(File.join(assets_dir, "jarvis-head.imageset"))
+  FileUtils.mkdir_p(File.join(assets_dir, "AccentColor.colorset"))
 
   File.write(
     File.join(assets_dir, "Contents.json"),
     '{"info":{"version":1,"author":"xcode"}}'
+  )
+  File.write(
+    File.join(assets_dir, "AccentColor.colorset", "Contents.json"),
+    <<~JSON
+      {
+        "colors": [
+          {
+            "idiom": "universal",
+            "color": {
+              "color-space": "srgb",
+              "components": {
+                "red": "0.29",
+                "green": "0.62",
+                "blue": "1.0",
+                "alpha": "1.0"
+              }
+            }
+          }
+        ],
+        "info": {"version": 1, "author": "xcode"}
+      }
+    JSON
   )
   File.write(
     File.join(assets_dir, "AppIcon.appiconset", "Contents.json"),
