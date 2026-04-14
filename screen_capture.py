@@ -16,9 +16,8 @@ def capture_screen() -> bytes:
     return buf.getvalue()
 
 
-async def describe_screen(anthropic_client) -> str:
-    """Capture screen and describe it using Claude Vision."""
-    png_bytes = capture_screen()
+async def describe_bytes(anthropic_client, png_bytes: bytes) -> str:
+    """Describe the given PNG bytes using Claude Vision."""
     b64 = base64.b64encode(png_bytes).decode("utf-8")
 
     response = await anthropic_client.messages.create(
@@ -43,3 +42,8 @@ async def describe_screen(anthropic_client) -> str:
         }],
     )
     return response.content[0].text
+
+
+async def describe_screen(anthropic_client) -> str:
+    """Capture the server's own screen and describe it using Claude Vision."""
+    return await describe_bytes(anthropic_client, capture_screen())

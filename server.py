@@ -246,6 +246,11 @@ _last_full_greeting_ts: float = 0.0
 # Mini where no location override is sent.
 session_context: dict[str, dict] = {}
 
+# Pending screenshot requests: session_id -> asyncio.Future.
+# When [ACTION:SCREEN] runs, we ask the client for a screenshot and
+# await the future until the client answers (or a timeout hits).
+pending_screenshots: dict[str, asyncio.Future] = {}
+
 
 def build_system_prompt(session_id: str | None = None, short_greeting: bool = False):
     # Per-session override for mobile geolocation. If the client sent a
@@ -406,7 +411,9 @@ async def synthesize_speech(text: str) -> bytes:
     return b"".join(audio_parts)
 
 
-async def execute_action(action: dict) -> str:
+async def execute_action(action: dict,
+                          session_id: str | None = None,
+                          ws: "WebSocket | None" = None) -> str:
     t = action["type"]
     p = action["payload"]
 
@@ -427,6 +434,25 @@ async def execute_action(action: dict) -> str:
         return f"Geoeffnet: {p}"
 
     elif t == "SCREEN":
+        # First try to get a screenshot from the connected client (macOS
+        # app / PWA on the user's device). If the client doesn't support
+        # it — or doesn't answer in time — fall back to the server-side
+        # screenshot of the Mac Mini's own display.
+        if session_id and ws is not None:
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future = loop.create_future()
+            pending_screenshots[session_id] = future
+            try:
+                await ws.send_json({"type": "request_screenshot"})
+                png_bytes = await asyncio.wait_for(future, timeout=8)
+                return await screen_capture.describe_bytes(ai, png_bytes)
+            except asyncio.TimeoutError:
+                print("[jarvis] Client didn't send screenshot in time — falling back to local capture", flush=True)
+            except Exception as e:
+                print(f"[jarvis] Client screenshot error: {e} — falling back to local capture", flush=True)
+            finally:
+                pending_screenshots.pop(session_id, None)
+
         return await screen_capture.describe_screen(ai)
 
     elif t == "NEWS":
@@ -600,7 +626,7 @@ async def process_message(session_id: str, user_text: str, ws: WebSocket):
             })
 
         try:
-            action_result = await execute_action(action)
+            action_result = await execute_action(action, session_id=session_id, ws=ws)
             print(f"  Result: {action_result}", flush=True)
         except Exception as e:
             print(f"  Action error: {e}", flush=True)
@@ -646,6 +672,19 @@ async def websocket_endpoint(ws: WebSocket):
             # this BEFORE the first "Jarvis activate" message so that
             # build_system_prompt already has the override ready when
             # the greeting is generated.
+            # Screenshot response from the client — resolve the pending
+            # future so [ACTION:SCREEN] can continue.
+            if data.get("type") == "screenshot":
+                b64 = data.get("data", "")
+                future = pending_screenshots.get(session_id)
+                if future is not None and not future.done():
+                    try:
+                        png_bytes = base64.b64decode(b64)
+                        future.set_result(png_bytes)
+                    except Exception as e:
+                        future.set_exception(e)
+                continue
+
             if data.get("type") == "location":
                 try:
                     lat = float(data.get("lat"))
@@ -682,6 +721,11 @@ async def websocket_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         conversations.pop(session_id, None)
         session_context.pop(session_id, None)
+        # Cancel any pending screenshot request so [ACTION:SCREEN]
+        # falls back immediately instead of waiting for the timeout.
+        pending = pending_screenshots.pop(session_id, None)
+        if pending is not None and not pending.done():
+            pending.cancel()
 
 
 # Static files — wrapped with a no-cache middleware so iOS Safari /

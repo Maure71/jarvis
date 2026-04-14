@@ -45,6 +45,10 @@ final class JarvisClient: NSObject, ObservableObject {
 
     var onDoneSpeaking: (() -> Void)?
 
+    // Screen capture is wired up by the app so the SwiftUI view can
+    // expose the authorization state too.
+    private let screenCapture = ScreenCaptureManager()
+
     override init() {
         super.init()
         let config = URLSessionConfiguration.default
@@ -132,8 +136,30 @@ final class JarvisClient: NSObject, ObservableObject {
             }
         case "status":
             statusText = json["text"] as? String ?? ""
+        case "request_screenshot":
+            handleScreenshotRequest()
         default:
             break
+        }
+    }
+
+    private func handleScreenshotRequest() {
+        // Capture off the main thread — CGDisplayCreateImage is
+        // expensive enough to briefly freeze the UI on large displays.
+        Task.detached { [weak self] in
+            guard let self else { return }
+            let png = await MainActor.run { self.screenCapture.captureMainDisplayPNG() }
+            guard let png else {
+                await MainActor.run {
+                    self.send(["type": "screenshot_error",
+                               "error": "Screen Recording permission fehlt"])
+                }
+                return
+            }
+            let b64 = png.base64EncodedString()
+            await MainActor.run {
+                self.send(["type": "screenshot", "data": b64])
+            }
         }
     }
 
