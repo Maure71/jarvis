@@ -19,6 +19,7 @@ struct JarvisMenubarApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
     private var floatingPanel: FloatingPanel?
