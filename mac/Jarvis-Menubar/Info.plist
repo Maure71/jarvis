@@ -28,5 +28,10 @@
         <string>Jarvis nutzt das Mikrofon um Ihre Sprachbefehle zu erkennen.</string>
         <key>NSSpeechRecognitionUsageDescription</key>
         <string>Jarvis nutzt Apple Spracherkennung um Ihre Befehle zu verstehen.</string>
+        <key>NSScreenCaptureUsageDescription</key>
+        <string>
+            Jarvis macht einen Screenshot, damit ich Ihnen erklaeren kann, was
+            auf dem Bildschirm zu sehen ist.
+        </string>
     </dict>
 </plist>

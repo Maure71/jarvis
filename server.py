@@ -246,6 +246,11 @@ _last_full_greeting_ts: float = 0.0
 # Mini where no location override is sent.
 session_context: dict[str, dict] = {}
 
+# Pending screenshot requests: session_id -> asyncio.Future.
+# When [ACTION:SCREEN] runs, we ask the client for a screenshot and
+# await the future until the client answers (or a timeout hits).
+pending_screenshots: dict[str, asyncio.Future] = {}
+
 
 def build_system_prompt(session_id: str | None = None, short_greeting: bool = False):
     # Per-session override for mobile geolocation. If the client sent a
@@ -322,6 +327,7 @@ AKTIONEN - Schreibe die passende Aktion ans ENDE deiner Antwort. Der Text VOR de
 Nutze diese Aktion bei Fragen nach Solar, PV, Batterie, Wallbox, Pool, Garten, Bewässerung, Auto/Fahrzeug-Akku, Alarm, ob jemand zu Hause ist, CO2, Außentemperatur oder Smart Home allgemein. Der aktuelle Stand steht unten auch schon im Block SMART HOME STATUS — bei einfachen Fragen kannst du direkt daraus antworten, bei detaillierten oder Live-Fragen nutze die Aktion fuer frische Daten.
 ECHTZEIT-PFLICHT: Bei Fragen zur Wallbox (Ladestatus, Ladeleistung, ob ein Auto laedt, Stecker-Status, Lademodus) nutze IMMER "[ACTION:HOME] wallbox" fuer frische Live-Daten. Antworte bei Wallbox-Fragen NIEMALS nur aus dem SMART HOME STATUS Cache — Wallbox-Sensoren koennen veraltet sein.
 [ACTION:LIGHT] service entity_id [parameter=wert] - Philips Hue Lichter steuern. Services: turn_on, turn_off, toggle. Optionale Parameter: brightness (0-255), color_temp (153-500 Mired). Beispiele: "[ACTION:LIGHT] turn_on light.kuche", "[ACTION:LIGHT] turn_off light.wohnzimmer", "[ACTION:LIGHT] turn_on light.schlafzimmer brightness=128", "[ACTION:LIGHT] toggle light.garage". Raeume: Kueche (light.kuche), Wohnzimmer (light.wohnzimmer), Schlafzimmer (light.schlafzimmer), Flur oben/unten (light.flur_oben, light.flur_unten), Veranda (light.veranda), Garage (light.garage), Kinderzimmer (light.kinderzimmer), Arbeitszimmer (light.arbeitszimmer_maure), HWR (light.hwr), Nebeneingang (light.nebeneingang), Muellhaus (light.mullhaus), Sofa Go (light.sofa_links_go, light.sofa_rechts_go), Leselampe (light.leselampe), Fernsehschrank (light.fernsehschrank), Anrichte (light.anrichte_links, light.anrichte_rechts), Bett Schlafzimmer (light.bett_schlafzimmer). Nutze diese Aktion wenn {USER_NAME} Licht an/aus/dimmen will. Wenn unklar welches Licht gemeint ist, frage nach.
+[ACTION:CLAUDE] task - Delegiere eine Coding- oder Entwickler-Aufgabe an Claude Code (das CLI laeuft im Jarvis-Workspace). Nutze diese Aktion wenn {USER_NAME} sagt: "sag Claude er soll...", "lass Claude das machen", "Claude soll...", oder wenn eine Aufgabe klar Entwickler-Arbeit ist (Code refactoren, Bug fixen, Feature bauen, Datei anlegen, Tests schreiben). Formuliere die Aufgabe als klaren Auftrag fuer Claude. Beispiele: "[ACTION:CLAUDE] Refactore die Wallbox-Integration und trenne die myenergi-spezifische Logik in eine eigene Datei", "[ACTION:CLAUDE] Fuege einen Unit-Test fuer die search_entities-Funktion in home_assistant.py hinzu". Schreibe einen kurzen Satz davor wie "Ich gebe das an Claude weiter, Sir." — der Lauf kann mehrere Minuten dauern.
 
 WENN {USER_NAME} "Jarvis activate" sagt:
 {activate_instructions}
@@ -405,7 +411,9 @@ async def synthesize_speech(text: str) -> bytes:
     return b"".join(audio_parts)
 
 
-async def execute_action(action: dict) -> str:
+async def execute_action(action: dict,
+                          session_id: str | None = None,
+                          ws: "WebSocket | None" = None) -> str:
     t = action["type"]
     p = action["payload"]
 
@@ -426,6 +434,40 @@ async def execute_action(action: dict) -> str:
         return f"Geoeffnet: {p}"
 
     elif t == "SCREEN":
+        # Ask the connected client (macOS app, PWA) for a screenshot.
+        # The Mac Mini itself is usually headless, so a server-side
+        # capture wouldn't help — we only fall back to it for text
+        # clients (no screen capabilities at all) or if the client
+        # silently disappears.
+        if session_id and ws is not None:
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future = loop.create_future()
+            pending_screenshots[session_id] = future
+            try:
+                await ws.send_json({"type": "request_screenshot"})
+                png_bytes = await asyncio.wait_for(future, timeout=15)
+                print(f"[jarvis] Describing client screenshot ({len(png_bytes)} bytes)", flush=True)
+                return await screen_capture.describe_bytes(ai, png_bytes)
+            except asyncio.TimeoutError:
+                print("[jarvis] Client didn't send screenshot within 15s", flush=True)
+                return "Der Bildschirm-Screenshot hat zu lange gedauert, Sir. Ist die macOS-App offen und hat Screen-Recording-Rechte?"
+            except RuntimeError as e:
+                msg = str(e)
+                if "permission" in msg.lower() or "rechte" in msg.lower():
+                    return (
+                        "Ich darf Ihren Bildschirm nicht ansehen, Sir. "
+                        "Bitte aktivieren Sie Screen Recording fuer Jarvis in "
+                        "Systemeinstellungen → Datenschutz & Sicherheit → Bildschirmaufnahme "
+                        "und starten Sie die App neu."
+                    )
+                return f"Der Client konnte keinen Screenshot machen: {msg}"
+            except Exception as e:
+                print(f"[jarvis] Client screenshot error: {e}", flush=True)
+                return f"Beim Screenshot ist etwas schiefgegangen: {e}"
+            finally:
+                pending_screenshots.pop(session_id, None)
+
+        # No active WebSocket — try a local capture as a last resort.
         return await screen_capture.describe_screen(ai)
 
     elif t == "NEWS":
@@ -476,6 +518,59 @@ async def execute_action(action: dict) -> str:
         friendly = entity_id.replace("light.", "").replace("_", " ").title()
         action_de = {"turn_on": "eingeschaltet", "turn_off": "ausgeschaltet", "toggle": "umgeschaltet"}
         return f"{friendly} wurde {action_de.get(service, service)}."
+
+    elif t == "CLAUDE":
+        # Delegate a coding task to Claude Code as a subprocess. Runs in
+        # the workspace directory from config.json and returns a short
+        # summary for TTS. Full output is written to logs/ for later
+        # inspection.
+        task_text = (p or "").strip()
+        if not task_text:
+            return "Was soll Claude denn machen, Sir?"
+
+        workspace = config.get("workspace_path", "")
+        if not workspace or not os.path.isdir(workspace):
+            return "Workspace-Pfad ist nicht konfiguriert."
+
+        # Write full output to a timestamped log file so nothing is lost.
+        logs_dir = os.path.join(os.path.dirname(__file__), "logs", "claude")
+        os.makedirs(logs_dir, exist_ok=True)
+        log_path = os.path.join(
+            logs_dir,
+            f"claude-{time.strftime('%Y%m%d-%H%M%S')}.log"
+        )
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "claude", "-p", task_text,
+                cwd=workspace,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
+            except asyncio.TimeoutError:
+                proc.kill()
+                return "Claude hat ueber zehn Minuten gebraucht — ich habe ihn gestoppt, Sir."
+
+            output = stdout.decode(errors="replace") if stdout else ""
+            with open(log_path, "w") as f:
+                f.write(f"# Task: {task_text}\n\n{output}")
+
+            if proc.returncode != 0:
+                return f"Claude ist mit Fehler {proc.returncode} ausgestiegen. Details in {os.path.basename(log_path)}."
+
+            # Last non-empty line is usually the summary
+            lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+            tail = "\n".join(lines[-6:]) if lines else "Keine Ausgabe."
+            # Keep it short enough for TTS
+            if len(tail) > 800:
+                tail = tail[-800:]
+            return f"Claude ist fertig, Sir. Hier das Ergebnis:\n{tail}"
+        except FileNotFoundError:
+            return "Das Claude-CLI ist nicht installiert oder nicht im PATH."
+        except Exception as e:
+            return f"Claude konnte nicht ausgefuehrt werden: {e}"
 
     return ""
 
@@ -546,7 +641,7 @@ async def process_message(session_id: str, user_text: str, ws: WebSocket):
             })
 
         try:
-            action_result = await execute_action(action)
+            action_result = await execute_action(action, session_id=session_id, ws=ws)
             print(f"  Result: {action_result}", flush=True)
         except Exception as e:
             print(f"  Action error: {e}", flush=True)
@@ -592,6 +687,34 @@ async def websocket_endpoint(ws: WebSocket):
             # this BEFORE the first "Jarvis activate" message so that
             # build_system_prompt already has the override ready when
             # the greeting is generated.
+            # Screenshot response from the client — resolve the pending
+            # future so [ACTION:SCREEN] can continue.
+            if data.get("type") == "screenshot":
+                b64 = data.get("data", "")
+                future = pending_screenshots.get(session_id)
+                if future is not None and not future.done():
+                    try:
+                        png_bytes = base64.b64decode(b64)
+                        if len(png_bytes) < 100:
+                            future.set_exception(
+                                ValueError(f"Screenshot payload too small ({len(png_bytes)} bytes)")
+                            )
+                        else:
+                            print(f"[jarvis] Got screenshot from client: {len(png_bytes)} bytes", flush=True)
+                            future.set_result(png_bytes)
+                    except Exception as e:
+                        future.set_exception(e)
+                continue
+
+            # Screenshot error from the client (e.g. permission missing).
+            if data.get("type") == "screenshot_error":
+                err = data.get("error", "unknown error")
+                print(f"[jarvis] Client screenshot_error: {err}", flush=True)
+                future = pending_screenshots.get(session_id)
+                if future is not None and not future.done():
+                    future.set_exception(RuntimeError(err))
+                continue
+
             if data.get("type") == "location":
                 try:
                     lat = float(data.get("lat"))
@@ -628,6 +751,11 @@ async def websocket_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         conversations.pop(session_id, None)
         session_context.pop(session_id, None)
+        # Cancel any pending screenshot request so [ACTION:SCREEN]
+        # falls back immediately instead of waiting for the timeout.
+        pending = pending_screenshots.pop(session_id, None)
+        if pending is not None and not pending.done():
+            pending.cancel()
 
 
 # Static files — wrapped with a no-cache middleware so iOS Safari /

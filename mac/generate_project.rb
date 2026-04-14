@@ -122,6 +122,7 @@ info_plist = {
   "LSMinimumSystemVersion"              => "14.0",
   "NSMicrophoneUsageDescription"        => "Jarvis nutzt das Mikrofon um Ihre Sprachbefehle zu erkennen.",
   "NSSpeechRecognitionUsageDescription" => "Jarvis nutzt Apple Spracherkennung um Ihre Befehle zu verstehen.",
+  "NSScreenCaptureUsageDescription"     => "Jarvis macht einen Screenshot, damit ich Ihnen erklaeren kann, was auf dem Bildschirm zu sehen ist.",
 }
 
 require 'rexml/document'
