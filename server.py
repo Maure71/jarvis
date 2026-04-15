@@ -19,6 +19,8 @@ import base64
 import json
 import os
 import re
+import subprocess
+import tempfile
 import time
 
 import anthropic
@@ -388,6 +390,7 @@ async def synthesize_speech(text: str) -> bytes:
         chunks = [text]
 
     audio_parts = []
+    fallback_needed = False
     for chunk in chunks:
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
         try:
@@ -405,10 +408,43 @@ async def synthesize_speech(text: str) -> bytes:
                 audio_parts.append(resp.content)
             else:
                 print(f"  TTS error body: {resp.text[:200]}", flush=True)
+                # Quota erschoepft oder Key-Problem -> lokaler Fallback.
+                if resp.status_code in (401, 402, 403, 429):
+                    fallback_needed = True
+                    break
         except Exception as e:
             print(f"  TTS EXCEPTION: {e}", flush=True)
+            fallback_needed = True
+            break
 
-    return b"".join(audio_parts)
+    if audio_parts:
+        return b"".join(audio_parts)
+
+    # Fallback: macOS `say` mit deutscher Stimme -> AIFF.
+    # AVAudioPlayer(data:) auf iOS/macOS erkennt AIFF automatisch,
+    # der Client-Code muss nicht angepasst werden.
+    if fallback_needed or not audio_parts:
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".aiff", delete=False) as f:
+                out_path = f.name
+            await asyncio.to_thread(
+                subprocess.run,
+                ["say", "-v", "Anna", "-o", out_path, text],
+                check=True,
+                capture_output=True,
+            )
+            with open(out_path, "rb") as f:
+                data = f.read()
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+            print(f"  TTS fallback (say): {len(data)} bytes", flush=True)
+            return data
+        except Exception as e:
+            print(f"  TTS fallback (say) failed: {e}", flush=True)
+
+    return b""
 
 
 async def execute_action(action: dict,
@@ -445,12 +481,12 @@ async def execute_action(action: dict,
             pending_screenshots[session_id] = future
             try:
                 await ws.send_json({"type": "request_screenshot"})
-                png_bytes = await asyncio.wait_for(future, timeout=15)
+                png_bytes = await asyncio.wait_for(future, timeout=45)
                 print(f"[jarvis] Describing client screenshot ({len(png_bytes)} bytes)", flush=True)
                 return await screen_capture.describe_bytes(ai, png_bytes)
             except asyncio.TimeoutError:
-                print("[jarvis] Client didn't send screenshot within 15s", flush=True)
-                return "Der Bildschirm-Screenshot hat zu lange gedauert, Sir. Ist die macOS-App offen und hat Screen-Recording-Rechte?"
+                print("[jarvis] Client didn't send screenshot within 45s", flush=True)
+                return "Der Bildschirm-Screenshot hat zu lange gedauert (>45s), Sir. Ist die macOS-App offen und hat Screen-Recording-Rechte?"
             except RuntimeError as e:
                 msg = str(e)
                 if "permission" in msg.lower() or "rechte" in msg.lower():
