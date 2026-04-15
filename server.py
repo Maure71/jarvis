@@ -432,7 +432,7 @@ async def synthesize_speech(text: str) -> bytes:
             m4a_path = aiff_path[:-5] + ".m4a"
             await asyncio.to_thread(
                 subprocess.run,
-                ["say", "-v", "Anna", "-o", aiff_path, text],
+                ["say", "-v", "Markus", "-o", aiff_path, text],
                 check=True,
                 capture_output=True,
             )
