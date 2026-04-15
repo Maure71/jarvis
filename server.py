@@ -420,26 +420,41 @@ async def synthesize_speech(text: str) -> bytes:
     if audio_parts:
         return b"".join(audio_parts)
 
-    # Fallback: macOS `say` mit deutscher Stimme -> AIFF.
-    # AVAudioPlayer(data:) auf iOS/macOS erkennt AIFF automatisch,
-    # der Client-Code muss nicht angepasst werden.
+    # Fallback: macOS `say` mit deutscher Stimme -> AIFF, dann per
+    # `afconvert` (macOS builtin, kein ffmpeg noetig) nach AAC/m4a.
+    # AAC ist ~10x kleiner als AIFF und bleibt damit unter dem
+    # Default-maximumMessageSize (1 MiB) von URLSessionWebSocketTask
+    # auf iOS. AVAudioPlayer(data:) spielt m4a/AAC nativ ab.
     if fallback_needed or not audio_parts:
         try:
             with tempfile.NamedTemporaryFile(suffix=".aiff", delete=False) as f:
-                out_path = f.name
+                aiff_path = f.name
+            m4a_path = aiff_path[:-5] + ".m4a"
             await asyncio.to_thread(
                 subprocess.run,
-                ["say", "-v", "Anna", "-o", out_path, text],
+                ["say", "-v", "Anna", "-o", aiff_path, text],
                 check=True,
                 capture_output=True,
             )
-            with open(out_path, "rb") as f:
+            await asyncio.to_thread(
+                subprocess.run,
+                ["afconvert",
+                 "-f", "m4af",              # MPEG-4 Audio Container
+                 "-d", "aac@22050",         # AAC, 22.05 kHz (Sprache reicht)
+                 "-b", "48000",             # 48 kbit/s, mono
+                 "-c", "1",
+                 aiff_path, m4a_path],
+                check=True,
+                capture_output=True,
+            )
+            with open(m4a_path, "rb") as f:
                 data = f.read()
-            try:
-                os.unlink(out_path)
-            except OSError:
-                pass
-            print(f"  TTS fallback (say): {len(data)} bytes", flush=True)
+            for p in (aiff_path, m4a_path):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+            print(f"  TTS fallback (say+afconvert): {len(data)} bytes m4a", flush=True)
             return data
         except Exception as e:
             print(f"  TTS fallback (say) failed: {e}", flush=True)
